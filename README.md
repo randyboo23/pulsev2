@@ -75,10 +75,9 @@ Techmeme for US K-12 education news.
 
 ## Automation (Recommended)
 - Use a scheduler to hit `/api/ingest` every 30 minutes.
-- `vercel.json` includes a cron entry for this path.
-- For Vercel:
-  - set `CRON_SECRET` in project env vars.
-  - Vercel sends `Authorization: Bearer <CRON_SECRET>` to `/api/ingest`.
+- Set `CRON_SECRET` in your deployment env vars.
+- Scheduler request format: `GET /api/ingest` with `Authorization: Bearer <CRON_SECRET>`.
+- Vercel Hobby supports daily cron only; use an external scheduler for 30-minute cadence.
 - `/api/ingest` also accepts manual `POST` with `x-ingest-secret` for debugging.
 - `/admin/stories` -> `Backfill story briefs (manual)` is a recovery tool, not the daily workflow.
 
