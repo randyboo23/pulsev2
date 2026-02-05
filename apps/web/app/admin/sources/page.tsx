@@ -5,6 +5,14 @@ import { updateSource } from "./actions";
 
 export const dynamic = "force-dynamic";
 
+type SourceRow = {
+  id: string;
+  name: string;
+  domain: string;
+  tier: "A" | "B" | "unknown";
+  weight: number;
+};
+
 export default async function AdminSourcesPage() {
   if (!isAdmin()) {
     redirect("/admin/login");
@@ -15,6 +23,7 @@ export default async function AdminSourcesPage() {
      from sources
      order by weight desc, name asc`
   );
+  const sources = result.rows as SourceRow[];
 
   return (
     <main className="main">
@@ -24,6 +33,7 @@ export default async function AdminSourcesPage() {
           <div className="tagline">Admin · Sources</div>
         </div>
         <div className="filters">
+          <a className="filter" href="/admin/feeds">Feeds</a>
           <a className="filter" href="/admin/stories">Stories</a>
           <a className="filter" href="/">Home</a>
         </div>
@@ -33,7 +43,7 @@ export default async function AdminSourcesPage() {
         <h2>Sources</h2>
         <p>Adjust tiers and weights to influence ranking.</p>
         <div className="story-list">
-          {result.rows.map((source) => (
+          {sources.map((source) => (
             <div className="story" key={source.id}>
               <form action={updateSource} className="story-list">
                 <input type="hidden" name="id" value={source.id} />

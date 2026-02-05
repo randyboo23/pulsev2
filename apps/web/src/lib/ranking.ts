@@ -6,6 +6,52 @@ type RankingInputs = {
   latestAt: Date;
 };
 
+export type Audience = "teachers" | "admins" | "edtech";
+
+const AUDIENCE_KEYWORDS: Record<Audience, string[]> = {
+  teachers: [
+    "teacher",
+    "teachers",
+    "classroom",
+    "instruction",
+    "curriculum",
+    "lesson",
+    "professional development",
+    "literacy",
+    "math",
+    "student learning"
+  ],
+  admins: [
+    "superintendent",
+    "principal",
+    "district",
+    "school board",
+    "budget",
+    "funding",
+    "policy",
+    "state",
+    "accountability",
+    "compliance"
+  ],
+  edtech: [
+    "edtech",
+    "education technology",
+    "ai",
+    "platform",
+    "software",
+    "tools",
+    "data privacy",
+    "cybersecurity",
+    "implementation"
+  ]
+};
+
+export function storyMatchesAudience(text: string, audience: Audience) {
+  const terms = AUDIENCE_KEYWORDS[audience] ?? [];
+  const lowered = text.toLowerCase();
+  return terms.some((term) => lowered.includes(term));
+}
+
 const KEYWORDS = {
   impact: [
     "legislation",

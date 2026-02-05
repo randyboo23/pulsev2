@@ -5,6 +5,42 @@ import { updateStory, mergeStory, hideInternational } from "./actions";
 
 export const dynamic = "force-dynamic";
 
+type TopArticlePreview = {
+  title: string | null;
+  url: string;
+  source: string | null;
+};
+
+type StoryAdminRow = {
+  id: string;
+  story_key: string | null;
+  title: string;
+  summary: string | null;
+  editor_title: string | null;
+  editor_summary: string | null;
+  status: "active" | "pinned" | "hidden" | null;
+  last_seen_at: string;
+  article_count: number | null;
+  source_names: string[] | null;
+  top_articles: TopArticlePreview[] | null;
+};
+
+type MergeCandidate = {
+  source: StoryAdminRow;
+  target: StoryAdminRow;
+  overlap: number;
+};
+
+type CleanupEventRow = {
+  created_at: string;
+  detail:
+    | {
+        deleted_articles?: number;
+        deleted_stories?: number;
+      }
+    | null;
+};
+
 export default async function AdminStoriesPage() {
   if (!isAdmin()) {
     redirect("/admin/login");
@@ -55,12 +91,12 @@ export default async function AdminStoriesPage() {
     order by s.last_seen_at desc
     limit 200`
   );
-  const stories = result.rows;
+  const stories = result.rows as StoryAdminRow[];
 
   let lastCleanup: string | undefined;
   let lastCleanupStats: { deleted_articles?: number; deleted_stories?: number } | undefined;
   try {
-    const cleanupResult = await pool.query(
+    const cleanupResult = await pool.query<CleanupEventRow>(
       `select created_at, detail
        from admin_events
        where event_type = 'cleanup_international'
@@ -68,9 +104,7 @@ export default async function AdminStoriesPage() {
        limit 1`
     );
     lastCleanup = cleanupResult.rows[0]?.created_at as string | undefined;
-    const detail = cleanupResult.rows[0]?.detail as
-      | { deleted_articles?: number; deleted_stories?: number }
-      | undefined;
+    const detail = cleanupResult.rows[0]?.detail ?? undefined;
     if (detail) {
       lastCleanupStats = {
         deleted_articles: Number(detail.deleted_articles ?? 0),
@@ -81,7 +115,7 @@ export default async function AdminStoriesPage() {
     lastCleanup = undefined;
   }
 
-  const candidates = [];
+  const candidates: MergeCandidate[] = [];
   const maxCandidates = 8;
   const windowDays = 4;
   const threshold = 0.6;
@@ -141,6 +175,7 @@ export default async function AdminStoriesPage() {
           <div className="tagline">Admin · Stories</div>
         </div>
         <div className="filters">
+          <a className="filter" href="/admin/feeds">Feeds</a>
           <a className="filter" href="/admin/sources">Sources</a>
           <a className="filter" href="/">Home</a>
         </div>
@@ -161,6 +196,9 @@ export default async function AdminStoriesPage() {
           ) : null}
           <form action="/api/admin/cleanup-international" method="post">
             <button className="chip" type="submit">Re-run international cleanup</button>
+          </form>
+          <form action="/api/admin/generate-summaries" method="post">
+            <button className="chip" type="submit">Backfill story briefs (manual)</button>
           </form>
         </div>
         {candidates.length > 0 ? (

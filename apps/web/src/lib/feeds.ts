@@ -6,10 +6,13 @@ export type FeedConfig = {
 };
 
 export type FeedEntry = {
+  id?: string;
   url: string;
   sourceName: string;
   domain: string;
   tier: "A" | "B" | "C" | "unknown";
+  isActive?: boolean;
+  feedType?: "rss" | "discovery" | "scrape";
 };
 
 const SITE_FILTER = TRUSTED_SITES.map((site) => `site:${site}`).join(" OR ");
@@ -51,91 +54,106 @@ const CURATED_RSS_FEEDS: FeedEntry[] = [
     url: "https://www.the74million.org/feed/",
     sourceName: "The 74",
     domain: "the74million.org",
-    tier: "B"
+    tier: "B",
+    feedType: "rss"
   },
   {
     url: "https://hechingerreport.org/feed/",
     sourceName: "Hechinger Report",
     domain: "hechingerreport.org",
-    tier: "B"
+    tier: "B",
+    feedType: "rss"
   },
   {
-    url: "https://www.edsurge.com/news/rss.xml",
+    url: "https://www.edsurge.com/news",
     sourceName: "EdSurge",
     domain: "edsurge.com",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
-    url: "https://www.k12dive.com/feeds/news/",
+    url: "https://www.k12dive.com/",
     sourceName: "K-12 Dive",
     domain: "k12dive.com",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
     url: "https://edsource.org/feed",
     sourceName: "EdSource",
     domain: "edsource.org",
-    tier: "A"
+    tier: "A",
+    feedType: "rss"
   },
   {
     url: "https://www.ednc.org/feed/",
     sourceName: "EdNC",
     domain: "ednc.org",
-    tier: "A"
+    tier: "A",
+    feedType: "rss"
   },
   {
     url: "https://www.eschoolnews.com/feed/",
     sourceName: "eSchool News",
     domain: "eschoolnews.com",
-    tier: "B"
+    tier: "B",
+    feedType: "rss"
   },
   {
     url: "https://districtadministration.com/feed/",
     sourceName: "District Administration",
     domain: "districtadministration.com",
-    tier: "B"
+    tier: "B",
+    feedType: "rss"
   },
   {
     url: "https://edtechmagazine.com/k12/rss.xml",
     sourceName: "EdTech Magazine",
     domain: "edtechmagazine.com",
-    tier: "B"
+    tier: "B",
+    feedType: "rss"
   },
   {
-    url: "https://www.edutopia.org/rss.xml",
+    url: "https://www.edutopia.org/",
     sourceName: "Edutopia",
     domain: "edutopia.org",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
     url: "https://www.educationnext.org/feed/",
     sourceName: "Education Next",
     domain: "educationnext.org",
-    tier: "unknown"
+    tier: "unknown",
+    feedType: "rss"
   },
   {
-    url: "https://www.brookings.edu/topic/education/feed/",
+    url: "https://www.brookings.edu/topic/education/",
     sourceName: "Brookings Education",
     domain: "brookings.edu",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
-    url: "https://www.rand.org/topics/education.feed.xml",
+    url: "https://www.rand.org/topics/education-and-literacy.html",
     sourceName: "RAND Education",
     domain: "rand.org",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
-    url: "https://www.kqed.org/education/feed",
+    url: "https://www.kqed.org/education",
     sourceName: "KQED Education",
     domain: "kqed.org",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   },
   {
-    url: "https://www.chalkbeat.org/feed/",
+    url: "https://www.chalkbeat.org/",
     sourceName: "Chalkbeat",
     domain: "chalkbeat.org",
-    tier: "B"
+    tier: "B",
+    feedType: "scrape"
   }
 ];
 
@@ -151,12 +169,14 @@ export function buildGoogleNewsRssUrl(query: string, daysBack = 7) {
   return `${baseUrl}?${params.toString()}`;
 }
 
-export function getFeedUrls(daysBack = 7): FeedEntry[] {
+export function getDefaultFeeds(daysBack = 7): FeedEntry[] {
   const discoveryFeeds = SEARCH_QUERIES.map((feed) => ({
     url: buildGoogleNewsRssUrl(feed.query, daysBack),
     sourceName: `Google News: ${feed.name}`,
     domain: "news.google.com",
-    tier: "unknown" as const
+    tier: "unknown" as const,
+    feedType: "discovery" as const,
+    isActive: true
   }));
 
   return [...CURATED_RSS_FEEDS, ...discoveryFeeds];

@@ -23,6 +23,10 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
       s.name as source_name
     from articles a
     left join sources s on s.id = a.source_id
+    where a.url not ilike '%/jobs/%'
+      and a.url not ilike '%://jobs.%'
+      and a.url not ilike '%/careers/%'
+      and coalesce(a.quality_label, 'unknown') <> 'non_article'
     order by coalesce(a.published_at, a.fetched_at) desc
     limit $1`,
     [limit]

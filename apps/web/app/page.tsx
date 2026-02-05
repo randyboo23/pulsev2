@@ -27,8 +27,28 @@ function getTodayDate() {
   return formatFullDate(new Date().toISOString());
 }
 
-export default async function HomePage() {
-  const stories = await getTopStories(18);
+function truncateHeadline(title: string, maxLength = 140) {
+  const trimmed = title.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  const cutoff = trimmed.slice(0, maxLength);
+  const lastSpace = cutoff.lastIndexOf(" ");
+  const safe = lastSpace > 60 ? cutoff.slice(0, lastSpace) : cutoff;
+  return `${safe.trim()}…`;
+}
+
+export default async function HomePage({
+  searchParams
+}: {
+  searchParams?: { audience?: string };
+}) {
+  const audience =
+    searchParams?.audience === "teachers" ||
+    searchParams?.audience === "admins" ||
+    searchParams?.audience === "edtech"
+      ? searchParams.audience
+      : undefined;
+
+  const stories = await getTopStories(18, audience);
   const articles = await getRecentArticles(12);
 
   const featuredStory = stories[0];
@@ -78,13 +98,37 @@ export default async function HomePage() {
       </div>
 
       <main className="main">
+        <div className="audience-filters">
+          <span className="audience-label">Audience:</span>
+          <a className={`audience-link ${!audience ? "active" : ""}`} href="/">
+            All
+          </a>
+          <a
+            className={`audience-link ${audience === "teachers" ? "active" : ""}`}
+            href="/?audience=teachers"
+          >
+            Teachers
+          </a>
+          <a
+            className={`audience-link ${audience === "admins" ? "active" : ""}`}
+            href="/?audience=admins"
+          >
+            Admins
+          </a>
+          <a
+            className={`audience-link ${audience === "edtech" ? "active" : ""}`}
+            href="/?audience=edtech"
+          >
+            EdTech
+          </a>
+        </div>
         {/* Featured Story */}
         {featuredStory ? (
           <article className="featured-story">
             <div className="featured-kicker">Lead Story</div>
             <h2 className="featured-headline">
               <a href={`/stories/${featuredStory.id}`}>
-                {featuredStory.editor_title ?? featuredStory.title}
+                {truncateHeadline(featuredStory.editor_title ?? featuredStory.title, 120)}
               </a>
             </h2>
             {(featuredStory.editor_summary ?? featuredStory.summary) && (
@@ -131,7 +175,7 @@ export default async function HomePage() {
                     <span className="story-item-number">{index + 2}</span>
                     <h3 className="story-headline">
                       <a href={`/stories/${story.id}`}>
-                        {story.editor_title ?? story.title}
+                        {truncateHeadline(story.editor_title ?? story.title, 120)}
                       </a>
                     </h3>
                     {(story.editor_summary ?? story.summary) && (

@@ -9,6 +9,22 @@ create table if not exists sources (
   created_at timestamptz not null default now()
 );
 
+create table if not exists feeds (
+  id uuid primary key default gen_random_uuid(),
+  source_id uuid references sources(id) on delete set null,
+  url text not null unique,
+  feed_type text not null default 'rss',
+  is_active boolean not null default true,
+  last_success_at timestamptz,
+  last_error text,
+  failure_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_feeds_active on feeds(is_active);
+create index if not exists idx_feeds_success_at on feeds(last_success_at desc);
+
 create table if not exists admin_events (
   id uuid primary key default gen_random_uuid(),
   event_type text not null,
@@ -22,14 +38,58 @@ create table if not exists articles (
   url text not null unique,
   title text,
   summary text,
+  quality_label text not null default 'unknown',
+  quality_score numeric not null default 0.5,
+  quality_reasons text[] not null default '{}',
+  quality_checked_at timestamptz,
+  summary_choice_source text,
+  summary_choice_method text not null default 'none',
+  summary_choice_confidence numeric not null default 0.0,
+  summary_choice_reasons text[] not null default '{}',
+  summary_choice_checked_at timestamptz,
+  summary_candidates jsonb not null default '[]'::jsonb,
   published_at timestamptz,
   fetched_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table if exists articles
+  add column if not exists quality_label text not null default 'unknown';
+
+alter table if exists articles
+  add column if not exists quality_score numeric not null default 0.5;
+
+alter table if exists articles
+  add column if not exists quality_reasons text[] not null default '{}';
+
+alter table if exists articles
+  add column if not exists quality_checked_at timestamptz;
+
+alter table if exists articles
+  add column if not exists summary_choice_source text;
+
+alter table if exists articles
+  add column if not exists summary_choice_method text not null default 'none';
+
+alter table if exists articles
+  add column if not exists summary_choice_confidence numeric not null default 0.0;
+
+alter table if exists articles
+  add column if not exists summary_choice_reasons text[] not null default '{}';
+
+alter table if exists articles
+  add column if not exists summary_choice_checked_at timestamptz;
+
+alter table if exists articles
+  add column if not exists summary_candidates jsonb not null default '[]'::jsonb;
+
 create index if not exists idx_articles_published_at on articles(published_at desc);
 create index if not exists idx_articles_fetched_at on articles(fetched_at desc);
+create index if not exists idx_articles_quality_label on articles(quality_label);
+create index if not exists idx_articles_quality_checked_at on articles(quality_checked_at desc);
+create index if not exists idx_articles_summary_choice_checked_at on articles(summary_choice_checked_at desc);
+create index if not exists idx_articles_summary_choice_method on articles(summary_choice_method);
 
 create table if not exists stories (
   id uuid primary key default gen_random_uuid(),
@@ -74,6 +134,12 @@ $$ language plpgsql;
 drop trigger if exists set_articles_updated_at on articles;
 create trigger set_articles_updated_at
 before update on articles
+for each row
+execute function set_updated_at();
+
+drop trigger if exists set_feeds_updated_at on feeds;
+create trigger set_feeds_updated_at
+before update on feeds
 for each row
 execute function set_updated_at();
 

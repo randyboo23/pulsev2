@@ -1282,3 +1282,32 @@ a:hover {
     transition: none !important;
   }
 }
+
+.audience-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 0 24px;
+  font-family: "IBM Plex Sans", "Inter", sans-serif;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.audience-label {
+  color: #7b756f;
+}
+
+.audience-link {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(26, 26, 24, 0.15);
+  color: #7b756f;
+  background: #faf8f5;
+}
+
+.audience-link.active {
+  color: #1a1a18;
+  border-color: #b8232f;
+}

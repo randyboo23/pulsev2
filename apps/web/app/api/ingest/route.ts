@@ -4,13 +4,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function isAuthorized(request: Request) {
-  const secret = process.env.INGEST_SECRET;
-  if (!secret) return false;
+  const ingestSecret = process.env.INGEST_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+
   const headerSecret = request.headers.get("x-ingest-secret");
-  return headerSecret === secret;
+  if (ingestSecret && headerSecret === ingestSecret) return true;
+
+  const authHeader = request.headers.get("authorization") ?? "";
+  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  const bearerToken = bearerMatch?.[1]?.trim();
+  if (!bearerToken) return false;
+
+  if (cronSecret && bearerToken === cronSecret) return true;
+  if (ingestSecret && bearerToken === ingestSecret) return true;
+  return false;
 }
 
-export async function POST(request: Request) {
+async function runIngest(request: Request) {
   if (!isAuthorized(request)) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -24,6 +34,10 @@ export async function POST(request: Request) {
   }
 }
 
+export async function POST(request: Request) {
+  return runIngest(request);
+}
+
 export async function GET(request: Request) {
-  return new Response("Use POST /api/ingest", { status: 405 });
+  return runIngest(request);
 }

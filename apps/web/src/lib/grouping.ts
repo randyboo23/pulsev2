@@ -116,6 +116,7 @@ export async function groupUngroupedArticles() {
     `select id, title, summary, published_at, fetched_at
      from articles
      where id not in (select article_id from story_articles)
+       and coalesce(quality_label, 'unknown') <> 'non_article'
      order by coalesce(published_at, fetched_at) desc
      limit 300`
   );

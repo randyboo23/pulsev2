@@ -33,7 +33,11 @@ export default async function StoryPage({
 
   const { story, articles } = result;
   const title = story.editor_title ?? story.title;
-  const summary = story.editor_summary ?? story.summary;
+  const summary =
+    story.editor_summary ??
+    story.summary ??
+    articles.find((article) => article.summary)?.summary ??
+    null;
 
   return (
     <>
