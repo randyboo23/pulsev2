@@ -10,12 +10,13 @@ This document defines the division of labor between Codex (backend/engine) and C
 - Data ingestion, enrichment, clustering (`apps/worker/`)
 - Business logic in `src/lib/` (ranking, grouping, articles, stories)
 - Authentication and admin logic
+- Admin UI when required for functionality (e.g., controls, forms, operational tooling)
 - External service integrations (RSS, email providers, etc.)
 - Type definitions in `packages/core/src/types.ts` (shared contract)
 
 ### Claude Owns (Design/Frontend)
-- All `.tsx` page components (`apps/web/app/**/page.tsx`)
-- Global styles (`apps/web/app/globals.css`)
+- Primary visual design and layout of `.tsx` pages (`apps/web/app/**/page.tsx`)
+- Global styles and theme direction (`apps/web/app/globals.css`)
 - Layout and visual hierarchy
 - Responsive design
 - UI states (loading, empty, error)
@@ -75,6 +76,8 @@ Editorial newspaper aesthetic with:
 ---
 
 ## How to Coordinate
+
+Codex may update UI files when needed to ship working functionality. Claude should remain the default owner of visual polish and brand-level layout decisions.
 
 ### Adding a New Feature
 
