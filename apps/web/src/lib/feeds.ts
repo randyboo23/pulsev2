@@ -31,7 +31,7 @@ const SEARCH_QUERIES: FeedConfig[] = [
   {
     name: "Teaching & Instruction",
     query:
-      '"instructional strategies" OR "teacher professional development" OR "learning gaps" OR "math instruction" OR "literacy"'
+      '"instructional strategies" OR "teacher professional development" OR "learning gaps" OR "math instruction" OR "literacy" -"my classroom" -"personal blog" -"lesson idea" -site:medium.com -site:wordpress.com'
   },
   {
     name: "Safety & Privacy",
@@ -153,6 +153,34 @@ const CURATED_RSS_FEEDS: FeedEntry[] = [
     sourceName: "Chalkbeat",
     domain: "chalkbeat.org",
     tier: "B",
+    feedType: "scrape"
+  },
+  {
+    url: "https://www.edweek.org/feed",
+    sourceName: "Education Week",
+    domain: "edweek.org",
+    tier: "A",
+    feedType: "rss"
+  },
+  {
+    url: "https://feeds.npr.org/1013/rss.xml",
+    sourceName: "NPR Education",
+    domain: "npr.org",
+    tier: "A",
+    feedType: "rss"
+  },
+  {
+    url: "https://www.pbs.org/newshour/topic/education/feed",
+    sourceName: "PBS NewsHour Education",
+    domain: "pbs.org",
+    tier: "A",
+    feedType: "rss"
+  },
+  {
+    url: "https://apnews.com/hub/education",
+    sourceName: "AP News Education",
+    domain: "apnews.com",
+    tier: "A",
     feedType: "scrape"
   }
 ];

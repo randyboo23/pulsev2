@@ -1,7 +1,7 @@
-# AGENTS.md — Global Rules for Codex
+# AGENTS.md — Global Rules
 
-These rules apply to all work in this repository.  
-Codex must read and follow this file before taking any action.
+These rules apply to all work in this repository.
+Read and follow this file before taking any action.
 
 ---
 

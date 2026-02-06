@@ -253,14 +253,13 @@ function countHits(text, terms) {
   return terms.reduce((count, term) => (lowered.includes(term) ? count + 1 : count), 0);
 }
 
-function classifyStoryType({ text, weakEvergreenSignals, impact, urgency, policyHits }) {
+function classifyStoryType({ text, weakEvergreenSignals, impact, urgency, policyHits, novelty }) {
   if (countHits(text, OPINION_HINTS) > 0) return "opinion";
   if (countHits(text, BREAKING_HINTS) > 0) return "breaking";
   if (policyHits > 0) return "policy";
-  const hardNewsSignals = urgency + Math.min(policyHits, 1);
   if (countHits(text, EVERGREEN_HINTS) > 0) return "evergreen";
   const instructionalHits = countHits(text, INSTRUCTIONAL_HINTS);
-  if (instructionalHits > 0 && policyHits === 0 && urgency === 0) return "evergreen";
+  if (instructionalHits > 0 && policyHits === 0 && urgency === 0 && impact === 0 && novelty === 0) return "evergreen";
   if (instructionalHits > 0 && weakEvergreenSignals) return "evergreen";
   return "feature";
 }
@@ -286,7 +285,8 @@ function analyzeStoryRanking(inputs) {
     weakEvergreenSignals,
     impact,
     urgency,
-    policyHits
+    policyHits,
+    novelty
   });
   const urgencyOverride = urgency > 0 && (hoursSince <= 6 || recentCount >= 2);
   const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.35 : 1;
@@ -294,14 +294,14 @@ function analyzeStoryRanking(inputs) {
   const authorityMultiplier = Math.max(0.3, Math.min(2.2, Math.pow(baseWeight, 3)));
   const lowAuthoritySingleton =
     sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
-  const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.62 : 1;
+  const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.75 : 1;
   const thinCoveragePenalty =
     !urgencyOverride &&
     storyType !== "breaking" &&
     sourceCount <= 1 &&
     recentCount <= 1 &&
     inputs.articleCount <= 1
-      ? 0.72
+      ? 0.82
       : 1;
   const lowNewsFeature =
     storyType === "feature" &&
@@ -309,13 +309,13 @@ function analyzeStoryRanking(inputs) {
     hardNewsSignals === 0 &&
     sourceCount <= 2 &&
     recentCount <= 1;
-  const hardNewsPenalty = lowNewsFeature ? 0.24 : 1;
+  const hardNewsPenalty = lowNewsFeature ? (authorityMultiplier >= 1 ? 0.6 : 0.45) : 1;
 
   const base =
     impact * 2.2 +
     urgency * 1.8 +
     novelty * 1.0 +
-    relevance * 1.0 +
+    relevance * 1.3 +
     volume * 0.9 +
     sourceDiversity * 0.7 +
     recency;

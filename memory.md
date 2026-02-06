@@ -1,7 +1,7 @@
 # Pulse Memory
 
 Purpose:
-- Shared decision memory for Codex + Claude so we do not re-litigate product choices.
+- Shared decision memory so we do not re-litigate product choices.
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
@@ -22,33 +22,50 @@ Last updated:
 - If preview confidence is low, render headline-only.
 - Headline-only is preferred over generic filler blurbs.
 - Legacy synthetic phrasing classes (`coverage is converging on ...`, generic `why it matters` tails) are explicitly suppressed.
+- AI summary budget: 50 calls per ingest cycle (up from 20).
+- Firecrawl scrape budget: 80 per ingest cycle (up from 40).
+- LLM summary prompt instructs "state key fact first" and max 60 words (up from 45).
+- LLM returns "IRRELEVANT" for off-topic content, which is discarded.
 
 ## Current Ranking Policy
-- Ranking is deterministic with explainable breakdown fields.
+- Deterministic ranking feeds into an AI reranking pass (Sonnet).
 - `story_type` is emitted as `breaking | policy | feature | evergreen | opinion`.
-- Lead eligibility is explicit (`lead_eligible`, `lead_reason`) and used to avoid weak lead picks.
-- Source authority now has stronger impact (nonlinear multiplier from source weight).
-- Single-source low-authority clusters are demoted.
-- Low-newsworthiness feature clusters (single-source, low-urgency, non-policy) are demoted by hard-news gate.
-- Instructional evergreen content should not occupy top/lead slots unless urgency override signals exist.
-- Malformed/generic titles (`slug permalinkurl...`, etc.) are filtered from ranked stories and wire display.
+- Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
+- Penalty values (tuned 2026-02-06):
+  - `singletonPenalty`: 0.75 (was 0.62)
+  - `thinCoveragePenalty`: 0.82 (was 0.72)
+  - `hardNewsPenalty`: 0.45 (unknown sources) / 0.6 (authority >= 1.0) (was flat 0.24)
+  - `evergreenPenalty`: 0.35 (unchanged)
+- Evergreen classification now requires `impact === 0 && novelty === 0` in addition to instructional hints.
+- Relevance weight boosted to 1.3x (was 1.0x).
+- AI reranker (Sonnet) reorders top 30 stories by editorial judgment; cached 15 minutes.
+- Unknown source default weight lowered to 0.7 (was 0.9).
+
+## AI Relevance Gate
+- Discovery feed articles and unknown-tier sources are checked by Claude Haiku.
+- Budget: 100 relevance checks per ingest cycle.
+- Score < 0.3: article rejected.
+- Score 0.3-0.5: marked `uncertain`, still inserted for admin review.
+- Score > 0.5: proceeds normally.
+- Stored in `relevance_score`, `relevance_category`, `relevance_reason` columns.
+
+## Source Policy
+- 20 curated RSS/scrape feeds (added EdWeek, NPR Education, PBS NewsHour, AP News).
+- 6 Google News discovery queries with exclusions for personal blogs.
+- TRUSTED_SITES expanded with national outlets (AP, NPR, PBS, Reuters, NYT, WaPo, Politico).
+- Tier A national outlets added: apnews.com, reuters.com, nytimes.com, washingtonpost.com, politico.com, npr.org, pbs.org.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
 - Manual `/admin/stories` backfill is recovery-only, not daily workflow.
-- Current quality regressions come from weak input + forced fallback text.
 - Runtime path remains in `apps/web`; `apps/worker` is deferred.
 
 ## Working Agreements
-- Claude owns design/UI treatment.
-- Codex owns backend functionality and data quality.
+- Claude handles all implementation: backend, frontend, data pipeline, and design.
 - Backend should pass clear rendering signals to UI (`preview_type`, `preview_confidence`).
 
 ## Near-Term Priorities
-- Validate hard-news gate behavior on live ingest runs and tune thresholds.
-- Add AI top-N reranker for editorial gravity (`scope`, `urgency`, `authority`, `audience_fit`).
+- Run ingest and validate AI relevance gate behavior on live data.
+- Tune relevance threshold if false positives/negatives appear.
 - Improve clustering beyond lexical `story_key` when ranking quality stabilizes.
-
-## Open Questions
-- Final threshold values for hard-news gate penalties.
-- Whether to add a strict `story_type=evergreen` exclusion from lead slots in all cases.
+- Add fixture-based regression tests for ranking and quality gates.

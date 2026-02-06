@@ -13,6 +13,22 @@ const parser = new Parser({
 
 let anthropicAvailable: boolean | null = null;
 
+/** Extract JSON from a response that may include markdown fences or preamble. */
+function extractJson(raw: string): string {
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+  const braceStart = raw.indexOf("{");
+  const bracketStart = raw.indexOf("[");
+  if (braceStart === -1 && bracketStart === -1) return raw.trim();
+  const start =
+    braceStart === -1 ? bracketStart : bracketStart === -1 ? braceStart : Math.min(braceStart, bracketStart);
+  const openChar = raw[start];
+  const closeChar = openChar === "{" ? "}" : "]";
+  const lastClose = raw.lastIndexOf(closeChar);
+  if (lastClose <= start) return raw.trim();
+  return raw.slice(start, lastClose + 1);
+}
+
 const MAX_ITEMS_PER_FEED = 100;
 const DOWNWEIGHT_PATTERNS = ["edtechinnovationhub", "ethi"];
 
@@ -167,6 +183,8 @@ type IngestResult = {
   summaryAdjudicatedDeterministic: number;
   summaryGeneratedLLM: number;
   summaryRejected: number;
+  relevanceChecked: number;
+  relevanceRejected: number;
 };
 
 type ArticleQualityLabel = "article" | "non_article" | "uncertain";
@@ -176,6 +194,75 @@ type ArticleQualityDecision = {
   score: number;
   reasons: string[];
 };
+
+type ContentRelevanceDecision = {
+  relevant: boolean;
+  score: number;
+  category: string;
+  reason: string;
+};
+
+async function classifyContentRelevance(
+  title: string,
+  summary: string
+): Promise<ContentRelevanceDecision | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  if (anthropicAvailable === false) return null;
+
+  const prompt = `You are an editorial filter for a K-12 education news aggregator serving superintendents, principals, and district administrators.
+
+Evaluate whether this article is editorially relevant for K-12 education leadership.
+
+Title: ${title}
+Summary: ${summary.slice(0, 500)}
+
+RELEVANT topics: policy/legislation, district operations, school board decisions, budget/funding, safety incidents, superintendent/principal news, EdTech procurement, assessment/accountability, workforce/staffing, curriculum adoption decisions, state/federal education policy, school closures/openings.
+
+NOT RELEVANT: personal teacher blogs, individual classroom activities without systemic impact, gardening/cooking for teachers, commercial product announcements without policy context, opinion pieces from non-experts, international education without US impact, general parenting advice, college/university news (unless K-12 pipeline), entertainment.
+
+Respond with ONLY valid JSON:
+{"relevant":true/false,"score":0.0-1.0,"category":"policy|district_ops|curriculum|safety|edtech|workforce|off_topic|personal|commercial","reason":"brief explanation"}`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-haiku-latest",
+        max_tokens: 100,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        anthropicAvailable = false;
+      }
+      return null;
+    }
+
+    anthropicAvailable = true;
+    const payload = await response.json();
+    const text = payload?.content?.[0]?.text;
+    if (!text) return null;
+
+    const parsed = JSON.parse(extractJson(text));
+    return {
+      relevant: Boolean(parsed.relevant),
+      score: Number(parsed.score) || 0,
+      category: String(parsed.category || "off_topic"),
+      reason: String(parsed.reason || "")
+    };
+  } catch {
+    return null;
+  }
+}
 
 type SummaryCandidateSource = "existing" | "rss" | "scrape" | "llm" | "fallback";
 
@@ -1027,6 +1114,56 @@ function extractFirstParagraph(html: string) {
   return sanitizeSummary(decodeEntities(stripTags(match[1])));
 }
 
+/**
+ * Free scrape: plain HTTP fetch + regex extraction. No API credits used.
+ * Returns extracted summary text, or empty string on failure.
+ */
+async function freeArticleScrape(url: string): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; PulseBot/1.0; +https://pulse-k12.com)",
+        Accept: "text/html"
+      },
+      redirect: "follow",
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return "";
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) return "";
+    // Only read first 200KB to avoid huge pages
+    const text = await response.text();
+    const html = text.slice(0, 200_000);
+
+    // Try meta description first (og:description, twitter:description, etc.)
+    const meta = extractMetaDescription(html);
+    if (meta && meta.length >= 40) return meta;
+
+    // Try first meaningful <p> in article body
+    const articleMatch = html.match(
+      /<article[^>]*>([\s\S]*?)<\/article>/i
+    );
+    const searchHtml = articleMatch?.[1] ?? html;
+    const paragraphs = searchHtml.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) ?? [];
+    for (const p of paragraphs.slice(0, 5)) {
+      const text = sanitizeSummary(
+        decodeEntities(stripTags(p.replace(/<[^>]*>/g, "")))
+      );
+      if (text && text.length >= 40) return text;
+    }
+
+    // Fall back to meta even if short
+    if (meta) return meta;
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 async function fetchArticleSummary(url: string) {
   const data = await fetchFirecrawlScrape(url, ["markdown", "html"], {
     onlyMainContent: true
@@ -1075,8 +1212,15 @@ async function generateAnthropicSummary(title: string, markdown: string) {
     .split("\n")
     .filter((line) => !SUMMARY_JUNK_PATTERNS.some((pattern) => pattern.test(line)))
     .join("\n")
-    .slice(0, 4000);
-  const prompt = `You are writing a concise brief for US K-12 educators.\n\nTitle: ${title}\n\nSource text:\n${trimmed}\n\nWrite 1-2 sentences (max 45 words). Use only the source text. Avoid boilerplate (subscribe, republish, sponsor, ads, navigation). Avoid hype or speculation.`;
+    .slice(0, 6000);
+  const prompt = `You are writing a concise brief for US K-12 education leaders (superintendents, principals, district admins).
+
+Title: ${title}
+
+Source text:
+${trimmed}
+
+Write 1-2 sentences (max 60 words). State the key fact or development first. Include who (which district, state, or organization) and what specifically happened. Do not start with "A new report..." or "According to..." or "New coverage...". Use only the source text. Avoid boilerplate (subscribe, republish, sponsor, ads, navigation). Avoid hype or speculation. If this article is about a personal experience or individual teacher activity without systemic implications, respond with just the word IRRELEVANT.`;
 
   for (const model of modelCandidates) {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1110,7 +1254,9 @@ async function generateAnthropicSummary(title: string, markdown: string) {
     const payload = await response.json();
     const text = payload?.content?.[0]?.text;
     if (!text || typeof text !== "string") return "";
-    return text.trim();
+    const trimmedResult = text.trim();
+    if (trimmedResult.toUpperCase() === "IRRELEVANT") return "";
+    return trimmedResult;
   }
 
   console.error("[ingest] anthropic error 404 across candidate models");
@@ -1444,6 +1590,7 @@ async function ensureSource(
   const isTrusted = TRUSTED_SITES.includes(domain);
   const tierALocalJournalism = SOURCE_TIERS.tierA.localJournalism as readonly string[];
   const tierAStateEducation = SOURCE_TIERS.tierA.stateEducation as readonly string[];
+  const tierANational = SOURCE_TIERS.tierA.national as readonly string[];
   const tierBDomains = SOURCE_TIERS.tierB.domains as readonly string[];
   const tierCDomains = SOURCE_TIERS.tierC.domains as readonly string[];
   const tier =
@@ -1451,6 +1598,7 @@ async function ensureSource(
       ? tierHint
       : tierALocalJournalism.includes(domain) ||
           tierAStateEducation.includes(domain) ||
+          tierANational.includes(domain) ||
           SOURCE_TIERS.tierA.govPatterns.some((pattern) => domain.includes(pattern))
         ? "A"
         : tierBDomains.includes(domain) ||
@@ -1468,7 +1616,7 @@ async function ensureSource(
     return null;
   }
 
-  let weight = isTrusted ? 1.2 : tier === "A" ? 1.1 : tier === "B" ? 1.0 : 0.9;
+  let weight = isTrusted ? 1.2 : tier === "A" ? 1.1 : tier === "B" ? 1.0 : 0.7;
   if (DOWNWEIGHT_PATTERNS.some((pattern) => domain.includes(pattern))) {
     weight = Math.min(weight, 0.7);
   }
@@ -1600,7 +1748,7 @@ export async function fillStorySummaries(
   let llmGenerated = 0;
   let rejected = 0;
   let aiRemaining = aiLimit === 0 ? Number.POSITIVE_INFINITY : aiLimit;
-  const fetchLimit = Math.min(limit, 30);
+  const fetchLimit = Math.min(limit, 20);
   const canUseAI = allowAI && Boolean(process.env.ANTHROPIC_API_KEY);
 
   for (const row of result.rows) {
@@ -1608,10 +1756,26 @@ export async function fillStorySummaries(
     const candidates: SummaryCandidate[] = [];
     addSummaryCandidate(candidates, "existing", row.summary as string | null, summaryTitle);
 
-    const hasStrongNonFallback = candidates.some(
-      (candidate) => candidate.source !== "fallback" && candidate.score >= 0.72
-    );
-    if (!hasStrongNonFallback && fetched < fetchLimit) {
+    const existingSummary = (row.summary as string | null) ?? "";
+    const summaryIsMissingOrGarbage =
+      existingSummary.trim().length < 40 ||
+      candidates.length === 0 ||
+      candidates.every((c) => c.score < 0.45);
+    // Try free HTTP scrape first (no API credits)
+    if (summaryIsMissingOrGarbage) {
+      try {
+        const freeText = await freeArticleScrape(row.url as string);
+        addSummaryCandidate(candidates, "scrape", freeText, summaryTitle);
+      } catch {
+        // Free scrape failed silently — will try Firecrawl next
+      }
+    }
+
+    // Only use Firecrawl if free scrape didn't produce a good result
+    const stillMissing =
+      summaryIsMissingOrGarbage &&
+      candidates.every((c) => c.score < 0.45);
+    if (stillMissing && fetched < fetchLimit) {
       try {
         const scraped = await fetchArticleSummary(row.url as string);
         const added = addSummaryCandidate(candidates, "scrape", scraped, summaryTitle);
@@ -1640,7 +1804,11 @@ export async function fillStorySummaries(
       );
     if (shouldGenerateLLM) {
       try {
-        const markdown = await fetchArticleMarkdown(row.url as string);
+        // Try free scrape for LLM context before using Firecrawl
+        let markdown = await freeArticleScrape(row.url as string);
+        if (markdown.length < 200) {
+          markdown = await fetchArticleMarkdown(row.url as string);
+        }
         const llm = await generateAnthropicSummary(
           summaryTitle,
           markdown
@@ -1960,7 +2128,10 @@ export async function ingestFeeds(): Promise<IngestResult> {
   let unresolvedGoogleSkipped = 0;
   let parseFailures = 0;
   let nonArticleBlocked = 0;
-  const scrapeSummaryLimit = 40;
+  let relevanceChecked = 0;
+  let relevanceRejected = 0;
+  const relevanceCheckLimit = 100;
+  const scrapeSummaryLimit = 30;
   let scrapeSummaries = 0;
 
   for (const feed of feeds) {
@@ -2054,14 +2225,55 @@ export async function ingestFeeds(): Promise<IngestResult> {
         rawItem.contentSnippet ?? rawItem.content ?? "",
         title
       );
-      const hasWeakSummaryCandidates =
-        summaryCandidates.length === 0 ||
-        summaryCandidates.every((candidate) => candidate.score < 0.62);
-      const shouldTryScrape =
+
+      // Cache check: if article already exists with a decent summary, reuse it
+      const cachedRow = await pool.query(
+        `select summary, summary_candidates from articles where url = $1 limit 1`,
+        [normalizedUrl]
+      );
+      if (cachedRow.rows.length > 0) {
+        const cachedSummary = (cachedRow.rows[0].summary as string | null) ?? "";
+        if (cachedSummary.trim().length >= 40) {
+          addSummaryCandidate(summaryCandidates, "existing", cachedSummary, title);
+        }
+      }
+
+      // Tier-based scrape priority:
+      // Tier A: RSS is usually good — only scrape (free) if RSS is completely missing
+      // Tier B: scrape (free) if RSS summary < 50 chars
+      // Tier C/unknown: always try scrape
+      const bestRssLen = summaryCandidates
+        .filter((c) => c.text)
+        .reduce((max, c) => Math.max(max, c.text.length), 0);
+      const needsScrape =
+        feed.tier === "A"
+          ? bestRssLen === 0 && feed.feedType === "scrape"
+          : feed.tier === "B"
+            ? feed.feedType === "scrape" || bestRssLen < 50
+            : feed.feedType === "scrape" ||
+              summaryCandidates.length === 0 ||
+              summaryCandidates.every((c) => !c.text || c.text.trim().length < 40 || c.score < 0.45);
+
+      // Try free HTTP scrape first (no API credits)
+      if (needsScrape) {
+        try {
+          const freeText = await freeArticleScrape(normalizedUrl);
+          addSummaryCandidate(summaryCandidates, "scrape", freeText, title);
+        } catch {
+          // Free scrape failed silently — will try Firecrawl next
+        }
+      }
+
+      // Only use Firecrawl for Tier C/unknown when free scrape failed
+      const stillNeedsScrape =
+        needsScrape &&
+        feed.tier !== "A" && feed.tier !== "B" &&
+        summaryCandidates.every((c) => !c.text || c.text.trim().length < 40 || c.score < 0.45);
+      const shouldTryFirecrawl =
+        stillNeedsScrape &&
         Boolean(process.env.FIRECRAWL_API_KEY) &&
-        scrapeSummaries < scrapeSummaryLimit &&
-        (feed.feedType === "scrape" || hasWeakSummaryCandidates);
-      if (shouldTryScrape) {
+        scrapeSummaries < scrapeSummaryLimit;
+      if (shouldTryFirecrawl) {
         try {
           const scraped = await fetchArticleSummary(normalizedUrl);
           const added = addSummaryCandidate(summaryCandidates, "scrape", scraped, title);
@@ -2098,6 +2310,25 @@ export async function ingestFeeds(): Promise<IngestResult> {
         nonArticleBlocked += 1;
         continue;
       }
+      // AI relevance gate for discovery feeds and unknown-tier sources
+      let relevanceResult: ContentRelevanceDecision | null = null;
+      const needsRelevanceCheck =
+        (feed.feedType === "discovery" || feed.tier === "unknown") &&
+        relevanceChecked < relevanceCheckLimit;
+      if (needsRelevanceCheck) {
+        relevanceResult = await classifyContentRelevance(title, summary);
+        if (relevanceResult) {
+          relevanceChecked += 1;
+          if (!relevanceResult.relevant && relevanceResult.score < 0.3) {
+            skipped += 1;
+            relevanceRejected += 1;
+            continue;
+          }
+          if (relevanceResult.score >= 0.3 && relevanceResult.score < 0.5) {
+            quality.label = "uncertain";
+          }
+        }
+      }
       const publishedAt = rawItem.isoDate
         ? new Date(rawItem.isoDate)
         : rawItem.pubDate
@@ -2131,9 +2362,13 @@ export async function ingestFeeds(): Promise<IngestResult> {
            summary_choice_reasons,
            summary_choice_checked_at,
            summary_candidates,
-           published_at
+           published_at,
+           relevance_score,
+           relevance_category,
+           relevance_reason,
+           relevance_checked_at
          )
-         values ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10, $11, now(), $12::jsonb, $13)
+         values ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10, $11, now(), $12::jsonb, $13, $14, $15, $16, $17)
          on conflict (url)
          do update set
            title = excluded.title,
@@ -2158,6 +2393,10 @@ export async function ingestFeeds(): Promise<IngestResult> {
            summary_choice_checked_at = now(),
            summary_candidates = excluded.summary_candidates,
            published_at = excluded.published_at,
+           relevance_score = coalesce(excluded.relevance_score, articles.relevance_score),
+           relevance_category = coalesce(excluded.relevance_category, articles.relevance_category),
+           relevance_reason = coalesce(excluded.relevance_reason, articles.relevance_reason),
+           relevance_checked_at = coalesce(excluded.relevance_checked_at, articles.relevance_checked_at),
            updated_at = now()
          returning (xmax = 0) as inserted`,
         [
@@ -2173,7 +2412,11 @@ export async function ingestFeeds(): Promise<IngestResult> {
           summaryChoiceConfidence,
           summaryChoiceReasons,
           candidatePayload,
-          publishedAt
+          publishedAt,
+          relevanceResult?.score ?? null,
+          relevanceResult?.category ?? null,
+          relevanceResult?.reason ?? null,
+          relevanceResult ? new Date() : null
         ]
       );
 
@@ -2187,7 +2430,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
 
   const qualityScan = await classifyRecentArticles(3000);
   const grouped = await groupUngroupedArticles();
-  const summaryFill = await fillStorySummaries(100, undefined, true, 20);
+  const summaryFill = await fillStorySummaries(100, undefined, true, 50);
 
   return {
     feeds: feeds.length,
@@ -2205,6 +2448,8 @@ export async function ingestFeeds(): Promise<IngestResult> {
     summaryAdjudicatedAI: summaryFill.adjudicatedAI,
     summaryAdjudicatedDeterministic: summaryFill.adjudicatedDeterministic,
     summaryGeneratedLLM: summaryFill.llmGenerated,
-    summaryRejected: summaryFill.rejected
+    summaryRejected: summaryFill.rejected,
+    relevanceChecked,
+    relevanceRejected
   };
 }

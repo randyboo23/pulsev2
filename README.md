@@ -74,7 +74,7 @@ Techmeme for US K-12 education news.
 - `apps/worker`: planned durable job orchestration pipeline.
 - `packages/core`: shared types and source lists.
 - `db/schema.sql`: Postgres schema.
-- `memory.md`: shared product and implementation decision memory for Codex + Claude.
+- `memory.md`: shared product and implementation decision memory.
 
 ## Manual Ingest
 1. Set `DATABASE_URL` and `INGEST_SECRET` in `.env`.

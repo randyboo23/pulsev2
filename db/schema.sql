@@ -91,6 +91,18 @@ create index if not exists idx_articles_quality_checked_at on articles(quality_c
 create index if not exists idx_articles_summary_choice_checked_at on articles(summary_choice_checked_at desc);
 create index if not exists idx_articles_summary_choice_method on articles(summary_choice_method);
 
+alter table if exists articles
+  add column if not exists relevance_score numeric;
+
+alter table if exists articles
+  add column if not exists relevance_category text;
+
+alter table if exists articles
+  add column if not exists relevance_reason text;
+
+alter table if exists articles
+  add column if not exists relevance_checked_at timestamptz;
+
 create table if not exists stories (
   id uuid primary key default gen_random_uuid(),
   story_key text not null,

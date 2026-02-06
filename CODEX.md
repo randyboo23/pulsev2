@@ -1,42 +1,39 @@
-# Codex Backend Guidelines for Pulse K-12
+# Pulse K-12 — Project Reference
 
-This document defines the division of labor between Codex (backend/engine) and Claude (design/frontend) for this project.
+This document provides implementation context and design system reference for the project.
 
-## Division of Labor
+## Ownership
 
-### Codex Owns (Backend/Engine)
+Claude handles all implementation: backend, frontend, data pipeline, and design.
+
 - Database schema and migrations (`db/`)
 - API endpoints (`apps/web/app/api/`)
-- Data ingestion, enrichment, clustering (`apps/worker/`)
-- Business logic in `src/lib/` (ranking, grouping, articles, stories)
+- Data ingestion, enrichment, clustering (`apps/web/src/lib/`)
+- Business logic (ranking, grouping, articles, stories)
 - Authentication and admin logic
-- Admin UI when required for functionality (e.g., controls, forms, operational tooling)
-- External service integrations (RSS, email providers, etc.)
-- Type definitions in `packages/core/src/types.ts` (shared contract)
-
-### Claude Owns (Design/Frontend)
-- Primary visual design and layout of `.tsx` pages (`apps/web/app/**/page.tsx`)
+- External service integrations (RSS, Firecrawl, Anthropic)
+- Type definitions (`packages/core/src/types.ts`)
+- Visual design, layout, and styling of `.tsx` pages
 - Global styles and theme direction (`apps/web/app/globals.css`)
-- Layout and visual hierarchy
-- Responsive design
-- UI states (loading, empty, error)
-- Form styling and client-side validation UX
+- Responsive design, UI states, form UX
 
 ### Shared Contract
-- `packages/core/src/types.ts` - Both sides reference this for data shapes
-- When adding new data requirements, update types first
+- `packages/core/src/types.ts` — all data shapes referenced across codebase
+- Update types first when adding new data requirements
 
 ---
 
-## Current Frontend State
+## Design System: "The Broadsheet"
 
-### Design System: "The Broadsheet"
 Editorial newspaper aesthetic with:
 - **Fonts**: Playfair Display (headlines), Source Serif 4 (body), IBM Plex Sans (UI)
 - **Colors**: Cream paper background (`#faf8f5`), ink text (`#1a1a18`), crimson accent (`#b8232f`)
 - **Layout**: 12-column grid, 8-col main + 4-col sidebar
 
-### Pages
+---
+
+## Pages
+
 | Route | Status | Notes |
 |-------|--------|-------|
 | `/` | Complete | Homepage with masthead, nav, newsletter bar, featured story, story grid, wire sidebar |
@@ -45,67 +42,29 @@ Editorial newspaper aesthetic with:
 | `/admin/sources` | Functional | Uses legacy classes |
 | `/newsletter` | **Needs page** | Nav link exists, page doesn't |
 
-### UI Elements Awaiting Backend
+---
 
-#### 1. Newsletter Subscription
+## Pending Features
+
+### Newsletter Subscription
 **Location**: Above-fold bar + footer form
 **Forms POST to**: `/api/newsletter/subscribe`
-**Expected payload**:
-```typescript
-{ email: string }
-```
-**Expected response**:
-```typescript
-{ success: boolean; message?: string }
-```
-**Backend tasks**:
+**Expected payload**: `{ email: string }`
+**Expected response**: `{ success: boolean; message?: string }`
+**Tasks**:
 - Create `subscribers` table (email, created_at, confirmed, etc.)
 - Create `/api/newsletter/subscribe` endpoint
 - Integrate with email service (Resend, Buttondown, etc.)
 - Optional: double opt-in flow
 
-#### 2. Category Filtering (Future)
+### Category Filtering (Future)
 **Location**: Nav bar links (Policy, Classroom, EdTech, Leadership)
 **Currently**: All link to `/` (placeholder)
 **When ready**: Change to `/category/[slug]` or `/?category=[slug]`
-**Backend tasks**:
+**Tasks**:
 - Add `category` field to stories or articles
 - Update `getTopStories()` to accept category filter
-- Categorization logic (manual tags? LLM classification?)
-
----
-
-## How to Coordinate
-
-Codex may update UI files when needed to ship working functionality. Claude should remain the default owner of visual polish and brand-level layout decisions.
-
-### Adding a New Feature
-
-1. **Define the contract first**
-   - What data does the frontend need?
-   - Add/update types in `packages/core/src/types.ts`
-
-2. **Backend implements**
-   - Database changes
-   - API endpoints
-   - Let frontend know when ready
-
-3. **Frontend wires up**
-   - Connect UI to real endpoints
-   - Add loading/error states
-
-### Example: Newsletter
-
-Backend checklist:
-- [ ] Create `subscribers` table
-- [ ] Create `POST /api/newsletter/subscribe` endpoint
-- [ ] Return `{ success: true }` or `{ success: false, message: "..." }`
-- [ ] (Optional) Email confirmation flow
-
-Frontend will then:
-- Add client-side form handling with success/error feedback
-- Show loading state on submit
-- Display success message or error
+- Categorization logic (LLM classification)
 
 ---
 
@@ -114,20 +73,26 @@ Frontend will then:
 ```
 apps/web/
 ├── app/
-│   ├── globals.css          # All styles (Claude owns)
-│   ├── layout.tsx           # Root layout with footer (Claude owns)
-│   ├── page.tsx             # Homepage (Claude owns)
+│   ├── globals.css          # All styles
+│   ├── layout.tsx           # Root layout with footer
+│   ├── page.tsx             # Homepage
 │   ├── stories/[id]/page.tsx
 │   ├── admin/               # Admin pages
-│   └── api/                 # API routes (Codex owns)
-│       └── newsletter/
-│           └── subscribe/
-│               └── route.ts # TO BE CREATED
+│   └── api/                 # API routes
 ├── src/lib/
-│   ├── stories.ts           # Story queries (Codex owns)
-│   ├── articles.ts          # Article queries (Codex owns)
-│   ├── ranking.ts           # Scoring logic (Codex owns)
+│   ├── stories.ts           # Story queries + ranking
+│   ├── articles.ts          # Article queries
+│   ├── ranking.ts           # Scoring logic
+│   ├── ingest.ts            # Ingestion pipeline
+│   ├── grouping.ts          # Story clustering
+│   ├── feeds.ts             # Feed registry
 │   └── db.ts                # Database connection
+packages/core/
+├── src/
+│   ├── types.ts             # Shared type definitions
+│   └── sources.ts           # Source tiers and trusted sites
+db/
+└── schema.sql               # Postgres schema (idempotent)
 ```
 
 ---
@@ -135,6 +100,5 @@ apps/web/
 ## Notes
 
 - Frontend forms use native HTML form submission (action + method)
-- Forms can be enhanced with client JS later for better UX
 - All styling uses CSS classes from `globals.css`
-- Admin pages use "legacy" class names - they work, low priority to update
+- Admin pages use "legacy" class names — they work, low priority to update

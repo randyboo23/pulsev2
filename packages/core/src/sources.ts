@@ -10,7 +10,16 @@ export const TRUSTED_SITES = [
   "ednc.org",
   "eschoolnews.com",
   "edtechmagazine.com",
-  "districtadministration.com"
+  "districtadministration.com",
+  "edweek.org",
+  "educationweek.org",
+  "apnews.com",
+  "npr.org",
+  "pbs.org",
+  "reuters.com",
+  "nytimes.com",
+  "washingtonpost.com",
+  "politico.com"
 ];
 
 export const SOURCE_TIERS = {
@@ -48,6 +57,15 @@ export const SOURCE_TIERS = {
     stateEducation: [
       "edsource.org",
       "ednc.org"
+    ],
+    national: [
+      "apnews.com",
+      "reuters.com",
+      "nytimes.com",
+      "washingtonpost.com",
+      "politico.com",
+      "npr.org",
+      "pbs.org"
     ]
   },
   tierB: {

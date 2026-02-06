@@ -325,6 +325,162 @@ function chooseLeadStory(stories: StoryRow[]) {
   return stories;
 }
 
+/** Extract JSON from a response that may include markdown fences or preamble. */
+function extractJson(raw: string): string {
+  // Strip markdown code fences: ```json ... ``` or ``` ... ```
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+  // Find first { ... } or [ ... ] block
+  const braceStart = raw.indexOf("{");
+  const bracketStart = raw.indexOf("[");
+  if (braceStart === -1 && bracketStart === -1) return raw.trim();
+  const start =
+    braceStart === -1 ? bracketStart : bracketStart === -1 ? braceStart : Math.min(braceStart, bracketStart);
+  const openChar = raw[start];
+  const closeChar = openChar === "{" ? "}" : "]";
+  const lastClose = raw.lastIndexOf(closeChar);
+  if (lastClose <= start) return raw.trim();
+  return raw.slice(start, lastClose + 1);
+}
+
+// AI reranking cache
+let aiRerankCache: { storyIds: string[]; demoted: Set<string>; timestamp: number } | null = null;
+const AI_RERANK_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+async function aiRerank(
+  stories: StoryRow[],
+  limit: number
+): Promise<StoryRow[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || stories.length < 3) return stories;
+
+  // Check cache validity
+  const now = Date.now();
+  const currentIds = stories.slice(0, 30).map((s) => s.id);
+  if (
+    aiRerankCache &&
+    now - aiRerankCache.timestamp < AI_RERANK_CACHE_TTL
+  ) {
+    const cachedIds = new Set(aiRerankCache.storyIds);
+    const overlap = currentIds.filter((id) => cachedIds.has(id)).length;
+    // Use cache if 70%+ overlap with previous top stories
+    if (overlap >= Math.min(currentIds.length, aiRerankCache.storyIds.length) * 0.7) {
+      const idOrder = new Map(aiRerankCache.storyIds.map((id, i) => [id, i]));
+      return stories
+        .filter((s) => !aiRerankCache!.demoted.has(s.id))
+        .sort((a, b) => {
+          const aIdx = idOrder.get(a.id) ?? 999;
+          const bIdx = idOrder.get(b.id) ?? 999;
+          if (aIdx === 999 && bIdx === 999) return b.score - a.score;
+          return aIdx - bIdx;
+        })
+        .slice(0, limit);
+    }
+  }
+
+  // Build prompt from top 30 stories
+  const candidates = stories.slice(0, 30);
+  const storyList = candidates
+    .map(
+      (s, i) =>
+        `${i + 1}. "${s.editor_title ?? s.title}" [${s.source_count} sources, type: ${s.story_type ?? "unknown"}]${s.summary ? `\n   ${s.summary.slice(0, 120)}` : ""}`
+    )
+    .join("\n");
+
+  const prompt = `You are the editorial director for a K-12 education news homepage serving superintendents, principals, and district administrators.
+
+Below are ${candidates.length} stories ranked by a deterministic algorithm. Reorder them by editorial importance.
+
+Ranking criteria (in priority order):
+1. Scope of impact: national > state > district > single school
+2. Urgency: time-sensitive developments > ongoing coverage > background
+3. Audience relevance: affects superintendent/principal decisions > general interest
+4. Source authority: established reporters and outlets > blogs and personal sites
+5. Novelty: new developments > updates on ongoing stories > evergreen content
+
+Stories:
+${storyList}
+
+Respond with ONLY valid JSON:
+{"order":[3,1,7,...],"demote":[15,22,...]}
+
+"order" = story numbers in recommended display order (most important first). Include at most ${limit} stories.
+"demote" = story numbers that should NOT appear on the homepage (irrelevant, personal blogs, commercial, or too niche).`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 300,
+        temperature: 0.1,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`[rerank] anthropic error ${response.status}`);
+      return stories.slice(0, limit);
+    }
+
+    const payload = await response.json();
+    const text = payload?.content?.[0]?.text;
+    if (!text) return stories.slice(0, limit);
+
+    const parsed = JSON.parse(extractJson(text));
+    const order: number[] = Array.isArray(parsed.order) ? parsed.order : [];
+    const demoteNums: number[] = Array.isArray(parsed.demote) ? parsed.demote : [];
+
+    const demotedIds = new Set(
+      demoteNums
+        .filter((n) => n >= 1 && n <= candidates.length)
+        .map((n) => candidates[n - 1].id)
+    );
+
+    const reordered: StoryRow[] = [];
+    const used = new Set<string>();
+
+    for (const num of order) {
+      if (num < 1 || num > candidates.length) continue;
+      const story = candidates[num - 1];
+      if (demotedIds.has(story.id) || used.has(story.id)) continue;
+      reordered.push(story);
+      used.add(story.id);
+    }
+
+    // Add any remaining stories not in the AI order (preserve deterministic fallback)
+    for (const story of stories) {
+      if (!used.has(story.id) && !demotedIds.has(story.id)) {
+        reordered.push(story);
+        used.add(story.id);
+      }
+    }
+
+    // Update cache
+    aiRerankCache = {
+      storyIds: reordered.slice(0, 30).map((s) => s.id),
+      demoted: demotedIds,
+      timestamp: now
+    };
+
+    console.log(
+      `[rerank] AI reordered ${order.length} stories, demoted ${demoteNums.length}`
+    );
+
+    return reordered.slice(0, limit);
+  } catch (error) {
+    console.error(
+      `[rerank] failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return stories.slice(0, limit);
+  }
+}
+
 export async function getTopStories(limit = 20, audience?: Audience): Promise<StoryRow[]> {
   const result = await pool.query(
     `select
@@ -503,10 +659,13 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
   const pinned = finalSet.filter((story) => story.status === "pinned");
   const rest = finalSet.filter((story) => story.status !== "pinned");
 
-  const ranked = [
+  const deterministicRanked = [
     ...pinned.sort((a, b) => b.score - a.score),
     ...rest.sort((a, b) => b.score - a.score)
-  ].slice(0, limit);
+  ];
+
+  // AI reranking pass (falls back to deterministic if unavailable)
+  const ranked = await aiRerank(deterministicRanked, limit);
 
   const leadAdjusted = chooseLeadStory([...ranked]);
   return dedupeStorySummariesForDisplay(leadAdjusted);
