@@ -48,26 +48,10 @@ Techmeme for US K-12 education news.
 - Additional fallback-template suppression is applied for legacy synthetic phrasing (including "coverage is converging on ...").
 - Admin controls for feeds, sources, and story status.
 
-## Current Gaps (Why Quality Regressions Happen)
-- Story grouping is still lexical and can miscluster profile/about content.
-- AI adjudication is in place for story summary candidates, but not yet for headline/body extraction candidates.
-- Quality gating is still mostly deterministic for article eligibility and grouping.
-- Ranking is still deterministic (no AI top-N reranker yet); no embedding-based relevance/novelty layer yet.
+## Remaining Gaps
+- Story grouping is still lexical (`story_key`) and can miscluster edge cases. Embedding-based clustering is the planned replacement.
 - Worker/orchestration path is mostly stubbed (`apps/worker`) while logic lives in web server code.
-- No reliable automated regression suite for ingestion and story quality.
-
-## Back-on-Track Plan
-1. Add AI adjudication for enrichment:
-   - compare RSS/metadata/scrape/LLM candidates.
-   - choose a winner per field with confidence + reason codes.
-2. Upgrade clustering and ranking:
-   - move from title-key clustering to embedding + recency hybrid.
-   - add editorial "gravity" scoring dimensions (impact, urgency, novelty, audience fit, credibility).
-3. Separate durable orchestration:
-   - move ingest/enrich/cluster/score jobs into worker orchestration with retries and observability.
-4. Add QA and guardrails:
-   - fixture-based tests for bad-content classes (profiles, bios, sponsorship fluff, markdown artifacts).
-   - dashboard metrics for null/low-quality summary rates and false-positive story rate.
+- No fixture-based regression suite for ingestion, clustering, or ranking quality.
 
 ## Structure
 - `apps/web`: Next.js frontend, admin, and current ingest runtime.
