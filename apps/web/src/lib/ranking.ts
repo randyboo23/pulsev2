@@ -19,7 +19,10 @@ export type RankingBreakdown = {
   sourceDiversity: number;
   recency: number;
   avgWeight: number;
+  authorityMultiplier: number;
   evergreenPenalty: number;
+  singletonPenalty: number;
+  lowAuthoritySingleton: boolean;
   weakEvergreenSignals: boolean;
   hoursSince: number;
 };
@@ -216,7 +219,11 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const urgencyOverride = urgency > 0 && (hoursSince <= 6 || recentCount >= 2);
 
   const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.45 : 1;
-  const weightMultiplier = Math.max(0.75, Math.min(1.25, inputs.avgWeight));
+  const baseWeight = Math.max(0.45, Math.min(1.5, inputs.avgWeight));
+  const authorityMultiplier = Math.max(0.3, Math.min(2.2, Math.pow(baseWeight, 3)));
+  const lowAuthoritySingleton =
+    sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
+  const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.62 : 1;
 
   const base =
     impact * 2.2 +
@@ -227,7 +234,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     sourceDiversity * 0.7 +
     recency;
 
-  const score = base * weightMultiplier * evergreenPenalty;
+  const score = base * authorityMultiplier * evergreenPenalty * singletonPenalty;
 
   let leadEligible = true;
   let leadReason: string | null = null;
@@ -238,6 +245,9 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   } else if (storyType === "opinion" && !urgencyOverride) {
     leadEligible = false;
     leadReason = "opinion_demoted";
+  } else if (lowAuthoritySingleton && !urgencyOverride) {
+    leadEligible = false;
+    leadReason = "single_low_authority_source";
   }
 
   return {
@@ -254,8 +264,11 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
       volume: Number(volume.toFixed(2)),
       sourceDiversity: Number(sourceDiversity.toFixed(2)),
       recency: Number(recency.toFixed(2)),
-      avgWeight: Number(weightMultiplier.toFixed(2)),
+      avgWeight: Number(baseWeight.toFixed(2)),
+      authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
+      singletonPenalty: Number(singletonPenalty.toFixed(2)),
+      lowAuthoritySingleton,
       weakEvergreenSignals,
       hoursSince: Number(hoursSince.toFixed(2))
     }

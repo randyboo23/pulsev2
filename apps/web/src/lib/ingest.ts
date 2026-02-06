@@ -502,10 +502,12 @@ const SUMMARY_JUNK_PATTERNS = [
 ];
 
 const SYNTHETIC_FALLBACK_PATTERNS = [
+  /^(coverage|reporting)\s+(?:is\s+)?(?:converging on|focused on|centered on|now centers on)\b/i,
   /^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b/i,
   /^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b/i,
   /^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b/i,
-  /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
+  /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i,
+  /\bwhy it matters:\s*(district leaders and educators may need to adjust policy,\s*staffing,\s*or classroom practice\.?|school systems may need to revisit planning,\s*staffing,\s*or implementation decisions\.?|this could influence district priorities and how schools execute day-to-day operations\.?)$/i
 ];
 
 const TRAILING_BOILERPLATE_PATTERNS = [
@@ -1553,7 +1555,9 @@ export async function fillStorySummaries(
     or s.summary ~* '(sign up|subscribe|newsletter|republish|sponsor|advertis|getty images|base64|streamlinehq|share on|follow us|facebook|twitter|instagram|linkedin)'
     or s.summary ~* '!\\[[^\\]]*\\]\\('
     or s.summary ~* '(contact.*contact|downloads?.*downloads?|share.*share.*share)'
+    or s.summary ~* '^(coverage|reporting)\\s+(is\\s+)?(converging on|focused on|centered on|now centers on)\\b'
     or s.summary ~* '^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking|budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward|policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights|education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)'
+    or s.summary ~* 'why it matters:\\s*(district leaders and educators may need to adjust policy,\\s*staffing,\\s*or classroom practice|school systems may need to revisit planning,\\s*staffing,\\s*or implementation decisions|this could influence district priorities and how schools execute day-to-day operations)'
     or (s.title is not null and s.summary is not null and lower(trim(s.summary)) like lower(trim(s.title)) || '%')
     or s.preview_type is null
     or s.preview_type = 'synthetic'

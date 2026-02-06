@@ -18,10 +18,12 @@ const DISPLAY_SUMMARY_DISCARD_TERMS = [
 ];
 
 const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
+  /^(coverage|reporting)\s+(?:is\s+)?(?:converging on|focused on|centered on|now centers on)\b/i,
   /^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b/i,
   /^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b/i,
   /^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b/i,
-  /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
+  /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i,
+  /\bwhy it matters:\s*(district leaders and educators may need to adjust policy,\s*staffing,\s*or classroom practice\.?|school systems may need to revisit planning,\s*staffing,\s*or implementation decisions\.?|this could influence district priorities and how schools execute day-to-day operations\.?)$/i
 ];
 
 const TRAILING_BOILERPLATE_PATTERNS = [
@@ -257,7 +259,11 @@ function analyzeStoryRanking(inputs) {
   const storyType = classifyStoryType(text, weakEvergreenSignals);
   const urgencyOverride = urgency > 0 && (hoursSince <= 6 || recentCount >= 2);
   const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.45 : 1;
-  const weightMultiplier = Math.max(0.75, Math.min(1.25, inputs.avgWeight));
+  const baseWeight = Math.max(0.45, Math.min(1.5, inputs.avgWeight));
+  const authorityMultiplier = Math.max(0.3, Math.min(2.2, Math.pow(baseWeight, 3)));
+  const lowAuthoritySingleton =
+    sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
+  const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.62 : 1;
 
   const base =
     impact * 2.2 +
@@ -267,7 +273,7 @@ function analyzeStoryRanking(inputs) {
     volume * 0.9 +
     sourceDiversity * 0.7 +
     recency;
-  const score = base * weightMultiplier * evergreenPenalty;
+  const score = base * authorityMultiplier * evergreenPenalty * singletonPenalty;
 
   let leadEligible = true;
   let leadReason = null;
@@ -277,6 +283,9 @@ function analyzeStoryRanking(inputs) {
   } else if (storyType === "opinion" && !urgencyOverride) {
     leadEligible = false;
     leadReason = "opinion_demoted";
+  } else if (lowAuthoritySingleton && !urgencyOverride) {
+    leadEligible = false;
+    leadReason = "single_low_authority_source";
   }
 
   return {
@@ -293,8 +302,11 @@ function analyzeStoryRanking(inputs) {
       volume: Number(volume.toFixed(2)),
       sourceDiversity: Number(sourceDiversity.toFixed(2)),
       recency: Number(recency.toFixed(2)),
-      avgWeight: Number(weightMultiplier.toFixed(2)),
+      avgWeight: Number(baseWeight.toFixed(2)),
+      authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
+      singletonPenalty: Number(singletonPenalty.toFixed(2)),
+      lowAuthoritySingleton,
       weakEvergreenSignals,
       hoursSince: Number(hoursSince.toFixed(2))
     }

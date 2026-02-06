@@ -40,14 +40,17 @@ Techmeme for US K-12 education news.
 - Story grouping by title key.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
+- Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
 - Ranking transparency in QA output (lead reason + score breakdown) for fast tuning.
+- Latest Wire now filters generic section/meta links and short non-headline titles more aggressively.
+- Additional fallback-template suppression is applied for legacy synthetic phrasing (including "coverage is converging on ...").
 - Admin controls for feeds, sources, and story status.
 
 ## Current Gaps (Why Quality Regressions Happen)
 - Story grouping is still lexical and can miscluster profile/about content.
 - AI adjudication is in place for story summary candidates, but not yet for headline/body extraction candidates.
 - Quality gating is still mostly deterministic for article eligibility and grouping.
-- Ranking is keyword-driven; no embedding-based relevance or novelty layer yet.
+- Ranking is still deterministic (no AI top-N reranker yet); no embedding-based relevance/novelty layer yet.
 - Worker/orchestration path is mostly stubbed (`apps/worker`) while logic lives in web server code.
 - No reliable automated regression suite for ingestion and story quality.
 

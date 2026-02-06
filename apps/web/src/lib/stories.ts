@@ -99,10 +99,15 @@ const DISPLAY_SUMMARY_DISCARD_TERMS = [
 ];
 
 const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
+  /^(coverage|reporting)\s+(?:is\s+)?(?:converging on|focused on|centered on|now centers on)\b/i,
   /^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b/i,
   /^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b/i,
   /^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b/i,
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
+];
+
+const DISPLAY_GENERIC_WHY_IT_MATTERS_PATTERNS = [
+  /\bwhy it matters:\s*(district leaders and educators may need to adjust policy,\s*staffing,\s*or classroom practice\.?|school systems may need to revisit planning,\s*staffing,\s*or implementation decisions\.?|this could influence district priorities and how schools execute day-to-day operations\.?)$/i
 ];
 
 const TRAILING_BOILERPLATE_PATTERNS = [
@@ -143,6 +148,9 @@ function normalizeSummary(summary: string | null | undefined) {
     return null;
   }
   if (DISPLAY_SYNTHETIC_FALLBACK_PATTERNS.some((pattern) => pattern.test(cleaned))) {
+    return null;
+  }
+  if (DISPLAY_GENERIC_WHY_IT_MATTERS_PATTERNS.some((pattern) => pattern.test(cleaned))) {
     return null;
   }
   if (/(?:\bcontact\b.*){2,}/i.test(cleaned)) return null;
