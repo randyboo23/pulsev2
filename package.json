@@ -9,6 +9,7 @@
     "dev:web": "npm --workspace apps/web run dev",
     "dev:worker": "npm --workspace apps/worker run dev",
     "lint": "npm --workspace apps/web run lint",
-    "db:setup": "psql -f db/schema.sql"
+    "db:setup": "psql -f db/schema.sql",
+    "qa:summaries": "bash scripts/qa-summaries.sh"
   }
 }

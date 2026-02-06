@@ -89,6 +89,18 @@ Techmeme for US K-12 education news.
 
 Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 
+## Local QA Loop (No Commit Needed)
+- Terminal 1: `npm run dev:web`
+- Terminal 2: `npm run qa:summaries`
+- What it does:
+  - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),
+  - prints ingest JSON stats,
+  - prints a summary-quality report (blank preview count, near-duplicate count, top preview list).
+- Optional knobs:
+  - `QA_BASE_URL` (default `http://localhost:3000`)
+  - `QA_STORY_LIMIT` (default `20`)
+  - `QA_SHOW_LIMIT` (default `10`)
+
 ## Autonomous Runtime (Expected Daily Operation)
 - Normal mode is fully automated:
   - scheduler calls `/api/ingest` every 30 minutes.
