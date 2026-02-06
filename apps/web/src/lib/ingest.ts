@@ -1479,7 +1479,7 @@ export async function fillStorySummaries(
     or s.summary ~* '(sign up|subscribe|newsletter|republish|sponsor|advertis|getty images|base64|streamlinehq|share on|follow us|facebook|twitter|instagram|linkedin)'
     or s.summary ~* '!\\[[^\\]]*\\]\\('
     or s.summary ~* '(contact.*contact|downloads?.*downloads?|share.*share.*share)'
-    or s.summary ~* '^(new coverage highlights|recent reporting points to|districts are now tracking|budget coverage now centers on|new finance reporting highlights|district budget attention is shifting toward|policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights|education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)'
+    or s.summary ~* '^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking|budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward|policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights|education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)'
     or (s.title is not null and s.summary is not null and lower(trim(s.summary)) like lower(trim(s.title)) || '%')`;
   if (storyIds && storyIds.length > 0) {
     where += " and s.id = any($2::uuid[])";
