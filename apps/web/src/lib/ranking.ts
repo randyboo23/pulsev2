@@ -24,6 +24,7 @@ export type RankingBreakdown = {
   authorityMultiplier: number;
   evergreenPenalty: number;
   singletonPenalty: number;
+  thinCoveragePenalty: number;
   hardNewsPenalty: number;
   lowNewsFeature: boolean;
   lowAuthoritySingleton: boolean;
@@ -218,11 +219,11 @@ function classifyStoryType(params: {
 
   if (policyHits > 0) return "policy";
 
-  const hardNewsSignals = impact + urgency + Math.min(policyHits, 1);
+  const hardNewsSignals = urgency + Math.min(policyHits, 1);
   const evergreenHits = countHits(text, EVERGREEN_HINTS);
   const instructionalHits = countHits(text, INSTRUCTIONAL_HINTS);
   if (evergreenHits > 0) return "evergreen";
-  if (instructionalHits > 0 && hardNewsSignals === 0) return "evergreen";
+  if (instructionalHits > 0 && policyHits === 0 && urgency === 0) return "evergreen";
   if (instructionalHits > 0 && weakEvergreenSignals) return "evergreen";
 
   return "feature";
@@ -235,7 +236,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const policyHits = Math.min(countHits(text, POLICY_HINTS), 3);
   const novelty = Math.min(countHits(text, KEYWORDS.novelty), 3);
   const relevance = Math.min(countHits(text, KEYWORDS.relevance), 3);
-  const hardNewsSignals = impact + urgency + Math.min(policyHits, 1);
+  const hardNewsSignals = urgency + Math.min(policyHits, 1);
 
   const sourceCount = Number.isFinite(inputs.sourceCount ?? 0) ? Number(inputs.sourceCount ?? 0) : 0;
   const recentCount = Number.isFinite(inputs.recentCount ?? 0) ? Number(inputs.recentCount ?? 0) : 0;
@@ -259,13 +260,21 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const lowAuthoritySingleton =
     sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.62 : 1;
+  const thinCoveragePenalty =
+    !urgencyOverride &&
+    storyType !== "breaking" &&
+    sourceCount <= 1 &&
+    recentCount <= 1 &&
+    inputs.articleCount <= 1
+      ? 0.72
+      : 1;
   const lowNewsFeature =
     storyType === "feature" &&
     !urgencyOverride &&
     hardNewsSignals === 0 &&
     sourceCount <= 2 &&
     recentCount <= 1;
-  const hardNewsPenalty = lowNewsFeature ? 0.58 : 1;
+  const hardNewsPenalty = lowNewsFeature ? 0.24 : 1;
 
   const base =
     impact * 2.2 +
@@ -276,7 +285,13 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     sourceDiversity * 0.7 +
     recency;
 
-  const score = base * authorityMultiplier * evergreenPenalty * singletonPenalty * hardNewsPenalty;
+  const score =
+    base *
+    authorityMultiplier *
+    evergreenPenalty *
+    singletonPenalty *
+    thinCoveragePenalty *
+    hardNewsPenalty;
 
   let leadEligible = true;
   let leadReason: string | null = null;
@@ -315,6 +330,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
       authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
       singletonPenalty: Number(singletonPenalty.toFixed(2)),
+      thinCoveragePenalty: Number(thinCoveragePenalty.toFixed(2)),
       hardNewsPenalty: Number(hardNewsPenalty.toFixed(2)),
       lowNewsFeature,
       lowAuthoritySingleton,
