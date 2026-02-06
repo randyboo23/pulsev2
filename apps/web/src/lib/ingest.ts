@@ -219,7 +219,7 @@ Summary: ${summary.slice(0, 500)}
 
 RELEVANT topics: policy/legislation, district operations, school board decisions, budget/funding, safety incidents, superintendent/principal news, EdTech procurement, assessment/accountability, workforce/staffing, curriculum adoption decisions, state/federal education policy, school closures/openings.
 
-NOT RELEVANT: personal teacher blogs, individual classroom activities without systemic impact, gardening/cooking for teachers, commercial product announcements without policy context, opinion pieces from non-experts, international education without US impact, general parenting advice, college/university news (unless K-12 pipeline), entertainment.
+NOT RELEVANT: personal teacher blogs or "my classroom" posts, individual classroom activities without systemic impact (e.g. running a student club, classroom decoration, lesson ideas), gardening/cooking for teachers, how-to listicles for individual teachers, first-person teacher narratives without policy implications, commercial product announcements without policy context, opinion pieces from non-experts, international education without US impact, general parenting advice, college/university news (unless K-12 pipeline), entertainment. Key signal: if the article uses first-person language ("I teach", "my students", "in my class") and describes personal practice rather than systemic news, score it below 0.3.
 
 Respond with ONLY valid JSON:
 {"relevant":true/false,"score":0.0-1.0,"category":"policy|district_ops|curriculum|safety|edtech|workforce|off_topic|personal|commercial","reason":"brief explanation"}`;
@@ -517,6 +517,25 @@ function classifyArticleQuality(params: {
     score -= 0.2;
     reasons.push("person_name_title");
   }
+
+  // Detect personal/classroom blog posts and community meta-posts
+  const personalBlogPatterns = [
+    /\b(my classroom|my students|my school|in my class)\b/i,
+    /\b(I teach|I use|I created|I started|I love|I decided|I tried)\b/i,
+    /\b(here are \d+ ways|tips for teachers|how I)\b/i,
+    /\brunning (a|your|student) .*\bclub\b/i,
+    /\b(teacher tip|classroom hack|lesson idea|activity idea)\b/i,
+    /\b(give feedback|share your thoughts|take our survey|join us|sign up for)\b/i,
+  ];
+  const personalHits = personalBlogPatterns.filter((p) => p.test(text)).length;
+  if (personalHits >= 2) {
+    score -= 0.35;
+    reasons.push("personal_blog_pattern");
+  } else if (personalHits === 1) {
+    score -= 0.15;
+    reasons.push("personal_blog_hint");
+  }
+
   if (summary.length >= 80) {
     score += 0.08;
   }
@@ -890,7 +909,11 @@ function isLowQualitySummary(text: string) {
 function normalizeTitleCase(title: string) {
   const trimmed = title.trim();
   if (!trimmed) return trimmed;
-  if (/[A-Z]/.test(trimmed)) return trimmed;
+  // Skip normalization only if title looks properly title-cased:
+  // multiple words starting with uppercase (not just sentence case)
+  const words = trimmed.split(/\s+/);
+  const upperStartCount = words.filter((w) => /^[A-Z]/.test(w)).length;
+  if (upperStartCount >= Math.max(2, words.length * 0.4)) return trimmed;
 
   const lowerExceptions = new Set([
     "a",
@@ -1495,7 +1518,8 @@ async function decideSummaryCandidate(params: {
     };
   }
 
-  if (allowAI && candidates.length > 1) {
+  const bestScore = Math.max(...candidates.map((c) => c.score));
+  if (allowAI && (candidates.length > 1 || bestScore < 0.7)) {
     const aiDecision = await adjudicateSummaryWithAnthropic(title, url, candidates);
     if (aiDecision) {
       if (aiDecision.winnerSource === "reject") {

@@ -85,7 +85,7 @@ export default async function StoryPage({
                 <div className="source-date">
                   {formatShortDate(article.published_at)}
                 </div>
-                {article.summary && (
+                {articles.length > 1 && article.summary && (
                   <p className="source-summary">{article.summary}</p>
                 )}
               </article>
