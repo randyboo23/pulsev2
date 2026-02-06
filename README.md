@@ -41,6 +41,7 @@ Techmeme for US K-12 education news.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
 - Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
+- Hard-news gate now demotes low-newsworthiness feature clusters (single-source, low-urgency, non-policy) so instructional evergreen content does not float to top slots.
 - Ranking transparency in QA output (lead reason + score breakdown) for fast tuning.
 - Latest Wire now filters generic section/meta links and short non-headline titles more aggressively.
 - Additional fallback-template suppression is applied for legacy synthetic phrasing (including "coverage is converging on ...").

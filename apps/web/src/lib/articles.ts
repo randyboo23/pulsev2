@@ -16,7 +16,9 @@ const GENERIC_WIRE_TITLE_PATTERNS = [
   /^the hamilton project$/i,
   /^home$/i,
   /^about$/i,
-  /^projects?$/i
+  /^projects?$/i,
+  /\bslug\s*permalinkurl\b/i,
+  /\bcharacters?\s+or\s+less\b/i
 ];
 
 function isGenericWireTitle(title: string) {

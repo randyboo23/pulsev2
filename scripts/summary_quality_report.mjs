@@ -91,6 +91,25 @@ const EVERGREEN_HINTS = [
   "explainer"
 ];
 
+const INSTRUCTIONAL_HINTS = [
+  "teaching",
+  "classroom",
+  "lesson",
+  "student engagement",
+  "instructional",
+  "activity",
+  "activities",
+  "professional development",
+  "how educators",
+  "for teachers"
+];
+
+const REJECT_TITLE_PATTERNS = [
+  /\bslug\s*permalinkurl\b/i,
+  /\bcharacters?\s+or\s+less\b/i,
+  /^untitled$/i
+];
+
 const SUMMARY_DEDUPE_STOPWORDS = new Set([
   "that",
   "this",
@@ -234,11 +253,15 @@ function countHits(text, terms) {
   return terms.reduce((count, term) => (lowered.includes(term) ? count + 1 : count), 0);
 }
 
-function classifyStoryType(text, weakEvergreenSignals) {
+function classifyStoryType({ text, weakEvergreenSignals, impact, urgency, policyHits }) {
   if (countHits(text, OPINION_HINTS) > 0) return "opinion";
   if (countHits(text, BREAKING_HINTS) > 0) return "breaking";
-  if (countHits(text, POLICY_HINTS) > 0) return "policy";
-  if (countHits(text, EVERGREEN_HINTS) > 0 && weakEvergreenSignals) return "evergreen";
+  if (policyHits > 0) return "policy";
+  const hardNewsSignals = impact + urgency + Math.min(policyHits, 1);
+  if (countHits(text, EVERGREEN_HINTS) > 0) return "evergreen";
+  const instructionalHits = countHits(text, INSTRUCTIONAL_HINTS);
+  if (instructionalHits > 0 && hardNewsSignals === 0) return "evergreen";
+  if (instructionalHits > 0 && weakEvergreenSignals) return "evergreen";
   return "feature";
 }
 
@@ -246,8 +269,10 @@ function analyzeStoryRanking(inputs) {
   const text = `${inputs.title} ${inputs.summary ?? ""}`;
   const impact = Math.min(countHits(text, KEYWORDS.impact), 3);
   const urgency = Math.min(countHits(text, KEYWORDS.urgency), 3);
+  const policyHits = Math.min(countHits(text, POLICY_HINTS), 3);
   const novelty = Math.min(countHits(text, KEYWORDS.novelty), 3);
   const relevance = Math.min(countHits(text, KEYWORDS.relevance), 3);
+  const hardNewsSignals = impact + urgency + Math.min(policyHits, 1);
 
   const sourceCount = Number.isFinite(inputs.sourceCount ?? 0) ? Number(inputs.sourceCount ?? 0) : 0;
   const recentCount = Number.isFinite(inputs.recentCount ?? 0) ? Number(inputs.recentCount ?? 0) : 0;
@@ -256,14 +281,27 @@ function analyzeStoryRanking(inputs) {
   const hoursSince = (Date.now() - inputs.latestAt.getTime()) / (1000 * 60 * 60);
   const recency = 1.1 * Math.exp(-hoursSince / 30);
   const weakEvergreenSignals = hoursSince > 18 && sourceCount <= 1 && recentCount <= 1;
-  const storyType = classifyStoryType(text, weakEvergreenSignals);
+  const storyType = classifyStoryType({
+    text,
+    weakEvergreenSignals,
+    impact,
+    urgency,
+    policyHits
+  });
   const urgencyOverride = urgency > 0 && (hoursSince <= 6 || recentCount >= 2);
-  const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.45 : 1;
+  const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.35 : 1;
   const baseWeight = Math.max(0.45, Math.min(1.5, inputs.avgWeight));
   const authorityMultiplier = Math.max(0.3, Math.min(2.2, Math.pow(baseWeight, 3)));
   const lowAuthoritySingleton =
     sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.62 : 1;
+  const lowNewsFeature =
+    storyType === "feature" &&
+    !urgencyOverride &&
+    hardNewsSignals === 0 &&
+    sourceCount <= 2 &&
+    recentCount <= 1;
+  const hardNewsPenalty = lowNewsFeature ? 0.58 : 1;
 
   const base =
     impact * 2.2 +
@@ -273,19 +311,22 @@ function analyzeStoryRanking(inputs) {
     volume * 0.9 +
     sourceDiversity * 0.7 +
     recency;
-  const score = base * authorityMultiplier * evergreenPenalty * singletonPenalty;
+  const score = base * authorityMultiplier * evergreenPenalty * singletonPenalty * hardNewsPenalty;
 
   let leadEligible = true;
   let leadReason = null;
   if (storyType === "evergreen" && !urgencyOverride) {
     leadEligible = false;
-    leadReason = "evergreen_weak_signal";
+    leadReason = "evergreen_instructional";
   } else if (storyType === "opinion" && !urgencyOverride) {
     leadEligible = false;
     leadReason = "opinion_demoted";
   } else if (lowAuthoritySingleton && !urgencyOverride) {
     leadEligible = false;
     leadReason = "single_low_authority_source";
+  } else if (lowNewsFeature) {
+    leadEligible = false;
+    leadReason = "low_newsworthiness_feature";
   }
 
   return {
@@ -297,8 +338,10 @@ function analyzeStoryRanking(inputs) {
     breakdown: {
       impact,
       urgency,
+      policyHits,
       novelty,
       relevance,
+      hardNewsSignals,
       volume: Number(volume.toFixed(2)),
       sourceDiversity: Number(sourceDiversity.toFixed(2)),
       recency: Number(recency.toFixed(2)),
@@ -306,6 +349,8 @@ function analyzeStoryRanking(inputs) {
       authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
       singletonPenalty: Number(singletonPenalty.toFixed(2)),
+      hardNewsPenalty: Number(hardNewsPenalty.toFixed(2)),
+      lowNewsFeature,
       lowAuthoritySingleton,
       weakEvergreenSignals,
       hoursSince: Number(hoursSince.toFixed(2))
@@ -431,6 +476,7 @@ async function run() {
         if (!title) return false;
         if (/^from\s+/i.test(title)) return false;
         if (/^(news|opinion|podcast|video)\s*\|/i.test(title)) return false;
+        if (REJECT_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return false;
         return true;
       })
       .map((row) => {

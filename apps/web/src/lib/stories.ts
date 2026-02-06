@@ -110,6 +110,12 @@ const DISPLAY_GENERIC_WHY_IT_MATTERS_PATTERNS = [
   /\bwhy it matters:\s*(district leaders and educators may need to adjust policy,\s*staffing,\s*or classroom practice\.?|school systems may need to revisit planning,\s*staffing,\s*or implementation decisions\.?|this could influence district priorities and how schools execute day-to-day operations\.?)$/i
 ];
 
+const REJECT_TITLE_PATTERNS = [
+  /\bslug\s*permalinkurl\b/i,
+  /\bcharacters?\s+or\s+less\b/i,
+  /^untitled$/i
+];
+
 const TRAILING_BOILERPLATE_PATTERNS = [
   /\bthe post\b[\s\S]{0,240}?\bappeared first on\b[\s\S]*$/i,
   /\bthis article (?:was )?originally (?:appeared|published) on\b[\s\S]*$/i,
@@ -397,6 +403,7 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
       if (!title) return false;
       if (/^from\s+/i.test(title)) return false;
       if (/^(news|opinion|podcast|video)\s*\|/i.test(title)) return false;
+      if (REJECT_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return false;
       return true;
     })
     .map((row) => {
