@@ -491,8 +491,8 @@ const SUMMARY_JUNK_PATTERNS = [
 ];
 
 const SYNTHETIC_FALLBACK_PATTERNS = [
-  /^(new coverage highlights|recent reporting points to|districts are now tracking)\b/i,
-  /^(budget coverage now centers on|new finance reporting highlights|district budget attention is shifting toward)\b/i,
+  /^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b/i,
+  /^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b/i,
   /^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b/i,
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
@@ -648,27 +648,26 @@ function buildStoryWhyItMattersSummary(params: {
   const { storyTitle, selectedSummary, supportingSummaries } = params;
 
   let base = sanitizeSummary(selectedSummary);
-  if (!base || isHeadlineEchoSummary(storyTitle, base)) {
+  const baseIsFallback = base ? isSyntheticFallbackSummary(base) : false;
+  const baseIsUsable = Boolean(base) && !baseIsFallback && !isHeadlineEchoSummary(storyTitle, base ?? "");
+
+  if (baseIsUsable) {
+    return base ?? "";
+  }
+
+  if (!base || baseIsFallback || isHeadlineEchoSummary(storyTitle, base)) {
     const alternate = supportingSummaries
       .map((summary) => sanitizeSummary(summary))
-      .find((summary) => summary && !isHeadlineEchoSummary(storyTitle, summary));
+      .find((summary) => summary && !isSyntheticFallbackSummary(summary) && !isHeadlineEchoSummary(storyTitle, summary));
     if (alternate) {
       base = alternate;
     }
   }
 
-  if (!base || isHeadlineEchoSummary(storyTitle, base)) {
+  if (!base || isSyntheticFallbackSummary(base) || isHeadlineEchoSummary(storyTitle, base)) {
     base = createFallbackSummaryFromTitle(storyTitle);
   }
-  if (!base) return "";
-
-  const hasImpactClause = /(why it matters|affect|impact|implications|could change|may need to|could reshape)/i.test(
-    base
-  );
-  const sentenceCount = base.split(/[.!?]+/).map((part) => part.trim()).filter(Boolean).length;
-  const shouldAppendWhy = !hasImpactClause && base.length < 150 && sentenceCount < 2;
-  const withWhy = shouldAppendWhy ? `${base} ${inferWhyItMattersLine(storyTitle)}` : base;
-  return sanitizeSummary(withWhy);
+  return base ? sanitizeSummary(base) : "";
 }
 
 function hasExcessiveRepetition(text: string) {

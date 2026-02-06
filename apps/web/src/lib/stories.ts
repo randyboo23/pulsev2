@@ -94,8 +94,8 @@ const DISPLAY_SUMMARY_DISCARD_TERMS = [
 ];
 
 const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
-  /^(new coverage highlights|recent reporting points to|districts are now tracking)\b/i,
-  /^(budget coverage now centers on|new finance reporting highlights|district budget attention is shifting toward)\b/i,
+  /^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b/i,
+  /^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b/i,
   /^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b/i,
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
@@ -183,6 +183,87 @@ export type StoryByIdResult = {
   story: StoryDetailRow;
   articles: StoryArticleRow[];
 };
+
+const SUMMARY_DEDUPE_STOPWORDS = new Set([
+  "that",
+  "this",
+  "with",
+  "from",
+  "which",
+  "their",
+  "there",
+  "about",
+  "after",
+  "before",
+  "under",
+  "over",
+  "into",
+  "while",
+  "where",
+  "when"
+]);
+
+function summaryDedupTokens(summary: string) {
+  return summary
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !SUMMARY_DEDUPE_STOPWORDS.has(token));
+}
+
+function summaryOverlapRatio(a: string, b: string) {
+  const tokensA = summaryDedupTokens(a);
+  const tokensB = summaryDedupTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let overlap = 0;
+  for (const token of setA) {
+    if (setB.has(token)) overlap += 1;
+  }
+
+  return overlap / Math.max(1, Math.min(setA.size, setB.size));
+}
+
+function summariesAreNearDuplicate(a: string, b: string) {
+  const normalizedA = a.toLowerCase().replace(/\s+/g, " ").trim();
+  const normalizedB = b.toLowerCase().replace(/\s+/g, " ").trim();
+  if (normalizedA === normalizedB) return true;
+  return summaryOverlapRatio(normalizedA, normalizedB) >= 0.82;
+}
+
+function dedupeStorySummariesForDisplay(stories: StoryRow[]) {
+  const seen: string[] = [];
+
+  return stories.map((story) => {
+    const editorCandidate = normalizeSummary(story.editor_summary ?? null);
+    const storyCandidate = normalizeSummary(story.summary ?? null);
+    const candidates = [editorCandidate, storyCandidate].filter((candidate, index, all) =>
+      Boolean(candidate) && all.indexOf(candidate) === index
+    ) as string[];
+
+    const chosen = candidates.find(
+      (candidate) => !seen.some((existing) => summariesAreNearDuplicate(candidate, existing))
+    );
+
+    if (!chosen) {
+      return {
+        ...story,
+        editor_summary: null,
+        summary: null
+      };
+    }
+
+    seen.push(chosen);
+    const pickedEditor = editorCandidate === chosen ? chosen : null;
+    return {
+      ...story,
+      editor_summary: pickedEditor,
+      summary: chosen
+    };
+  });
+}
 
 export async function getTopStories(limit = 20, audience?: Audience): Promise<StoryRow[]> {
   const result = await pool.query(
@@ -294,10 +375,12 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
   const pinned = finalSet.filter((story) => story.status === "pinned");
   const rest = finalSet.filter((story) => story.status !== "pinned");
 
-  return [
+  const ranked = [
     ...pinned.sort((a, b) => b.score - a.score),
     ...rest.sort((a, b) => b.score - a.score)
   ].slice(0, limit);
+
+  return dedupeStorySummariesForDisplay(ranked);
 }
 
 export async function getStoryById(id: string): Promise<StoryByIdResult | null> {

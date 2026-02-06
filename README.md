@@ -33,6 +33,8 @@ Techmeme for US K-12 education news.
 - Story brief guardrails: anti-headline-echo checks, deterministic fallback briefs, and section-index URL filtering.
 - Weak RSS summaries can be upgraded via bounded scrape enrichment (when `FIRECRAWL_API_KEY` is set), across feed types.
 - Synthetic fallback phrasing is suppressed in homepage display selection to reduce repetitive previews.
+- Facts-first story summaries are preferred over generic impact templates during story summary assembly.
+- Homepage preview dedupe suppresses near-duplicate blurb text across top stories.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Story grouping by title key.
 - Basic education-specific ranking rubric.
