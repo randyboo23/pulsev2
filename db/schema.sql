@@ -96,6 +96,10 @@ create table if not exists stories (
   story_key text not null,
   title text not null,
   summary text,
+  preview_text text,
+  preview_type text not null default 'headline_only',
+  preview_confidence numeric not null default 0.0,
+  preview_reason text,
   editor_title text,
   editor_summary text,
   status text not null default 'active',
@@ -104,6 +108,18 @@ create table if not exists stories (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists stories
+  add column if not exists preview_text text;
+
+alter table if exists stories
+  add column if not exists preview_type text not null default 'headline_only';
+
+alter table if exists stories
+  add column if not exists preview_confidence numeric not null default 0.0;
+
+alter table if exists stories
+  add column if not exists preview_reason text;
 
 create index if not exists idx_stories_story_key on stories(story_key);
 create index if not exists idx_stories_story_key_last_seen on stories(story_key, last_seen_at desc);

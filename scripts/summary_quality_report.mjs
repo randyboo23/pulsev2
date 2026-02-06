@@ -4,6 +4,7 @@ const { Client } = pg;
 
 const TOP_LIMIT = Number.parseInt(process.env.QA_STORY_LIMIT ?? "20", 10) || 20;
 const SHOW_LIMIT = Number.parseInt(process.env.QA_SHOW_LIMIT ?? "10", 10) || 10;
+const MIN_PREVIEW_CONFIDENCE = Number.parseFloat(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58") || 0.58;
 
 const DISPLAY_SUMMARY_DISCARD_TERMS = [
   "sign up",
@@ -42,11 +43,21 @@ const SUMMARY_DEDUPE_STOPWORDS = new Set([
   "when"
 ]);
 
+function clamp(value, min, max) {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
 const STORY_QUERY = `
   select
     s.id,
     s.title,
     s.summary,
+    s.preview_text,
+    s.preview_type,
+    s.preview_confidence,
+    s.preview_reason,
     s.editor_title,
     s.editor_summary,
     s.status,
@@ -285,20 +296,71 @@ async function run() {
         const editorSummary = normalizeSummary(row.editor_summary);
         const storySummary = normalizeSummary(row.summary);
         const latestArticleSummary = normalizeSummary(row.latest_summary);
-        const resolvedSummary = editorSummary ?? storySummary ?? latestArticleSummary;
+        const previewText = normalizeSummary(row.preview_text);
+        const previewTypeRaw = String(row.preview_type ?? "").toLowerCase();
+        const previewTypeValue =
+          previewTypeRaw === "full" ||
+          previewTypeRaw === "excerpt" ||
+          previewTypeRaw === "headline_only" ||
+          previewTypeRaw === "synthetic"
+            ? previewTypeRaw
+            : null;
+        const previewConfidenceRaw = Number(row.preview_confidence ?? 0);
+        const previewConfidence = Number(
+          clamp(Number.isFinite(previewConfidenceRaw) ? previewConfidenceRaw : 0, 0, 1).toFixed(2)
+        );
+
+        const hasStructuredPreview =
+          previewTypeValue === "full" || previewTypeValue === "excerpt" || previewTypeValue === "headline_only";
+        let autoSummary = null;
+        let autoPreviewType = "headline_only";
+        let autoPreviewConfidence = previewConfidence;
+
+        if (hasStructuredPreview) {
+          if (
+            (previewTypeValue === "full" || previewTypeValue === "excerpt") &&
+            previewText &&
+            previewConfidence >= MIN_PREVIEW_CONFIDENCE
+          ) {
+            autoSummary = previewText;
+            autoPreviewType = previewTypeValue;
+          } else {
+            autoSummary = null;
+            autoPreviewType = "headline_only";
+          }
+        } else {
+          autoSummary = storySummary ?? latestArticleSummary;
+          autoPreviewType = autoSummary ? "excerpt" : "headline_only";
+          autoPreviewConfidence = autoSummary ? 0.5 : 0;
+        }
+
+        const resolvedSummary = editorSummary ?? autoSummary;
+        const resolvedPreviewType = editorSummary ? "full" : autoPreviewType;
+        const resolvedPreviewConfidence = editorSummary ? 1 : autoPreviewConfidence;
+        let score = scoreStory({
+          title: row.editor_title ?? row.title,
+          summary: resolvedSummary,
+          articleCount: Number(row.article_count),
+          avgWeight: Number(row.avg_weight),
+          latestAt: new Date(row.latest_at)
+        });
+
+        if (!editorSummary) {
+          if (!autoSummary) {
+            score = Number((score * 0.9).toFixed(2));
+          } else if (resolvedPreviewConfidence < MIN_PREVIEW_CONFIDENCE + 0.08) {
+            score = Number((score * 0.96).toFixed(2));
+          }
+        }
 
         return {
           ...row,
-          summary: storySummary ?? latestArticleSummary,
+          summary: autoSummary,
+          preview_type: resolvedPreviewType,
+          preview_confidence: resolvedPreviewConfidence,
           editor_summary: editorSummary,
           article_count: Number(row.article_count),
-          score: scoreStory({
-            title: row.editor_title ?? row.title,
-            summary: resolvedSummary,
-            articleCount: Number(row.article_count),
-            avgWeight: Number(row.avg_weight),
-            latestAt: new Date(row.latest_at)
-          })
+          score
         };
       });
 
@@ -313,6 +375,11 @@ async function run() {
     const summaries = displayRows
       .map((story) => story.editor_summary ?? story.summary)
       .filter(Boolean);
+    const previewTypeCounts = displayRows.reduce((acc, story) => {
+      const key = String(story.preview_type ?? "unknown");
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {});
 
     let duplicatePairs = 0;
     for (let i = 0; i < summaries.length; i += 1) {
@@ -342,6 +409,7 @@ async function run() {
     console.log(`- Blank previews after filters/dedupe: ${blankShown}`);
     console.log(`- Synthetic fallback previews shown: ${syntheticShown}`);
     console.log(`- Near-duplicate preview pairs: ${duplicatePairs}`);
+    console.log(`- Preview types: ${Object.entries(previewTypeCounts).map(([k, v]) => `${k}:${v}`).join(", ")}`);
 
     if (repeatedOpenings.length > 0) {
       console.log("- Repeated preview openings:");

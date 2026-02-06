@@ -100,6 +100,14 @@ const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
 
+const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
+
+function clamp(value: number, min: number, max: number) {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
 function normalizeSummary(summary: string | null | undefined) {
   if (!summary) return null;
 
@@ -144,6 +152,10 @@ export type StoryRow = {
   id: string;
   title: string;
   summary: string | null;
+  preview_text?: string | null;
+  preview_type?: "full" | "excerpt" | "headline_only" | "synthetic" | null;
+  preview_confidence?: number | null;
+  preview_reason?: string | null;
   editor_title?: string | null;
   editor_summary?: string | null;
   status?: string | null;
@@ -271,6 +283,10 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
       s.id,
       s.title,
       s.summary,
+      s.preview_text,
+      s.preview_type,
+      s.preview_confidence,
+      s.preview_reason,
       s.editor_title,
       s.editor_summary,
       s.status,
@@ -342,32 +358,87 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
       return true;
     })
     .map((row) => {
-    const editorSummary = normalizeSummary(row.editor_summary as string | null | undefined);
-    const storySummary = normalizeSummary(row.summary as string | null | undefined);
-    const latestArticleSummary = normalizeSummary(row.latest_summary as string | null | undefined);
-    const resolvedSummary = editorSummary ?? storySummary ?? latestArticleSummary;
-    const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
-    const score = scoreStory({
-      title: row.editor_title ?? row.title,
-      summary: resolvedSummary,
-      articleCount: Number(row.article_count),
-      avgWeight: Number(row.avg_weight),
-      latestAt: new Date(row.latest_at)
-    });
+      const editorSummary = normalizeSummary(row.editor_summary as string | null | undefined);
+      const storySummary = normalizeSummary(row.summary as string | null | undefined);
+      const latestArticleSummary = normalizeSummary(row.latest_summary as string | null | undefined);
+      const previewText = normalizeSummary(row.preview_text as string | null | undefined);
+      const previewTypeRaw = String(row.preview_type ?? "").toLowerCase();
+      const previewTypeValue =
+        previewTypeRaw === "full" ||
+        previewTypeRaw === "excerpt" ||
+        previewTypeRaw === "headline_only" ||
+        previewTypeRaw === "synthetic"
+          ? previewTypeRaw
+          : null;
+      const previewReason = String(row.preview_reason ?? "").trim();
+      const previewConfidenceRaw = Number(row.preview_confidence ?? 0);
+      const previewConfidence = Number(
+        clamp(Number.isFinite(previewConfidenceRaw) ? previewConfidenceRaw : 0, 0, 1).toFixed(2)
+      );
 
-    return {
-      ...row,
-      title: normalizeTitleCase(row.title ?? ""),
-      summary: storySummary ?? latestArticleSummary,
-      editor_summary: editorSummary,
-      article_count: Number(row.article_count),
-      source_count: Number(row.source_count),
-      recent_count: Number(row.recent_count),
-      avg_weight: Number(row.avg_weight),
-      score,
-      matches_audience: audience ? storyMatchesAudience(text, audience) : true
-    };
-  });
+      const hasStructuredPreview =
+        previewTypeValue === "full" || previewTypeValue === "excerpt" || previewTypeValue === "headline_only";
+      const isLegacyDefaultHeadlineOnly =
+        previewTypeValue === "headline_only" &&
+        !previewText &&
+        previewConfidence === 0 &&
+        previewReason.length === 0;
+      let autoSummary: string | null = null;
+      let autoPreviewType: "full" | "excerpt" | "headline_only" = "headline_only";
+      let autoPreviewConfidence = previewConfidence;
+
+      if (hasStructuredPreview && !isLegacyDefaultHeadlineOnly) {
+        if (
+          (previewTypeValue === "full" || previewTypeValue === "excerpt") &&
+          previewText &&
+          previewConfidence >= MIN_PREVIEW_CONFIDENCE
+        ) {
+          autoSummary = previewText;
+          autoPreviewType = previewTypeValue;
+        } else {
+          autoSummary = null;
+          autoPreviewType = "headline_only";
+        }
+      } else {
+        autoSummary = storySummary ?? latestArticleSummary;
+        autoPreviewType = autoSummary ? "excerpt" : "headline_only";
+        autoPreviewConfidence = autoSummary ? 0.5 : 0;
+      }
+
+      const resolvedSummary = editorSummary ?? autoSummary;
+      const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
+      let score = scoreStory({
+        title: row.editor_title ?? row.title,
+        summary: resolvedSummary,
+        articleCount: Number(row.article_count),
+        avgWeight: Number(row.avg_weight),
+        latestAt: new Date(row.latest_at)
+      });
+
+      if (!editorSummary) {
+        if (!autoSummary) {
+          score = Number((score * 0.9).toFixed(2));
+        } else if (autoPreviewConfidence < MIN_PREVIEW_CONFIDENCE + 0.08) {
+          score = Number((score * 0.96).toFixed(2));
+        }
+      }
+
+      return {
+        ...row,
+        title: normalizeTitleCase(row.title ?? ""),
+        summary: autoSummary,
+        preview_text: autoSummary,
+        preview_type: editorSummary ? "full" : autoPreviewType,
+        preview_confidence: editorSummary ? 1 : autoPreviewConfidence,
+        editor_summary: editorSummary,
+        article_count: Number(row.article_count),
+        source_count: Number(row.source_count),
+        recent_count: Number(row.recent_count),
+        avg_weight: Number(row.avg_weight),
+        score,
+        matches_audience: audience ? storyMatchesAudience(text, audience) : true
+      };
+    });
 
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
   const finalSet = filtered.length > 0 ? filtered : scored;

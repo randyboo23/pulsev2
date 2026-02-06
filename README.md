@@ -35,6 +35,7 @@ Techmeme for US K-12 education news.
 - Synthetic fallback phrasing is suppressed in homepage display selection to reduce repetitive previews.
 - Facts-first story summaries are preferred over generic impact templates during story summary assembly.
 - Homepage preview dedupe suppresses near-duplicate blurb text across top stories.
+- Story previews are confidence-gated via `preview_type` and `preview_confidence`; fallback/synthetic output is stored for debugging but displayed as headline-only.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Story grouping by title key.
 - Basic education-specific ranking rubric.
@@ -66,6 +67,7 @@ Techmeme for US K-12 education news.
 - `apps/worker`: planned durable job orchestration pipeline.
 - `packages/core`: shared types and source lists.
 - `db/schema.sql`: Postgres schema.
+- `memory.md`: shared product and implementation decision memory for Codex + Claude.
 
 ## Manual Ingest
 1. Set `DATABASE_URL` and `INGEST_SECRET` in `.env`.

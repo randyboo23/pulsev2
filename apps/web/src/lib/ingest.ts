@@ -195,6 +195,15 @@ type SummaryDecision = {
   method: SummaryDecisionMethod;
 };
 
+type StoryPreviewType = "full" | "excerpt" | "headline_only" | "synthetic";
+
+type StoryPreviewDecision = {
+  text: string | null;
+  type: StoryPreviewType;
+  confidence: number;
+  reason: string;
+};
+
 type FillStorySummariesResult = {
   enriched: number;
   adjudicatedAI: number;
@@ -202,6 +211,8 @@ type FillStorySummariesResult = {
   llmGenerated: number;
   rejected: number;
 };
+
+const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
 
 function cleanTitle(title: string) {
   if (!title) return "";
@@ -668,6 +679,58 @@ function buildStoryWhyItMattersSummary(params: {
     base = createFallbackSummaryFromTitle(storyTitle);
   }
   return base ? sanitizeSummary(base) : "";
+}
+
+function decideStoryPreview(params: {
+  storyTitle: string;
+  selectedSummary: string;
+  decision: SummaryDecision;
+}): StoryPreviewDecision {
+  const { storyTitle, selectedSummary, decision } = params;
+  const cleaned = sanitizeSummary(selectedSummary);
+  const confidence = Number(clamp(decision.confidence, 0, 1).toFixed(2));
+
+  if (!cleaned) {
+    return {
+      text: null,
+      type: "headline_only",
+      confidence: 0,
+      reason: "empty_preview_text"
+    };
+  }
+
+  const isFallbackSource = decision.source === "fallback";
+  const isSyntheticText = isSyntheticFallbackSummary(cleaned);
+  const isHeadlineEcho = isHeadlineEchoSummary(storyTitle, cleaned);
+
+  if (isFallbackSource || isSyntheticText || isHeadlineEcho) {
+    return {
+      text: null,
+      type: "headline_only",
+      confidence: Number(clamp(confidence, 0, 0.34).toFixed(2)),
+      reason: isFallbackSource
+        ? "fallback_suppressed"
+        : isSyntheticText
+          ? "synthetic_suppressed"
+          : "headline_echo_suppressed"
+    };
+  }
+
+  if (confidence < MIN_PREVIEW_CONFIDENCE) {
+    return {
+      text: null,
+      type: "headline_only",
+      confidence,
+      reason: "low_confidence"
+    };
+  }
+
+  return {
+    text: cleaned,
+    type: decision.source === "llm" ? "full" : "excerpt",
+    confidence,
+    reason: decision.reasons[0] ?? "candidate_selected"
+  };
 }
 
 function hasExcessiveRepetition(text: string) {
@@ -1480,7 +1543,11 @@ export async function fillStorySummaries(
     or s.summary ~* '!\\[[^\\]]*\\]\\('
     or s.summary ~* '(contact.*contact|downloads?.*downloads?|share.*share.*share)'
     or s.summary ~* '^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking|budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward|policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights|education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)'
-    or (s.title is not null and s.summary is not null and lower(trim(s.summary)) like lower(trim(s.title)) || '%')`;
+    or (s.title is not null and s.summary is not null and lower(trim(s.summary)) like lower(trim(s.title)) || '%')
+    or s.preview_type is null
+    or s.preview_type = 'synthetic'
+    or (s.preview_reason is null and s.preview_text is null)
+    or (s.preview_type <> 'headline_only' and (s.preview_text is null or length(trim(s.preview_text)) = 0))`;
   if (storyIds && storyIds.length > 0) {
     where += " and s.id = any($2::uuid[])";
     params.push(storyIds);
@@ -1595,6 +1662,16 @@ export async function fillStorySummaries(
     if (adjudication.rejected || !adjudication.decision) {
       rejected += 1;
       console.warn(`[ingest] summary rejected for ${row.url}`);
+      await pool.query(
+        `update stories
+         set preview_text = null,
+             preview_type = 'headline_only',
+             preview_confidence = 0,
+             preview_reason = 'adjudication_rejected',
+             updated_at = now()
+         where id = $1`,
+        [row.story_id]
+      );
       continue;
     }
 
@@ -1602,6 +1679,16 @@ export async function fillStorySummaries(
     if (!summary) {
       rejected += 1;
       console.warn(`[ingest] summary empty for ${row.url}`);
+      await pool.query(
+        `update stories
+         set preview_text = null,
+             preview_type = 'headline_only',
+             preview_confidence = 0,
+             preview_reason = 'empty_summary',
+             updated_at = now()
+         where id = $1`,
+        [row.story_id]
+      );
       continue;
     }
 
@@ -1627,6 +1714,11 @@ export async function fillStorySummaries(
       supportingSummaries
     });
     const finalStorySummary = storySummary || summary;
+    const preview = decideStoryPreview({
+      storyTitle: (row.story_title as string | null) ?? summaryTitle,
+      selectedSummary: summary,
+      decision: adjudication.decision
+    });
 
     const candidatePayload = JSON.stringify(
       candidates.map((candidate) => ({
@@ -1668,9 +1760,20 @@ export async function fillStorySummaries(
     await pool.query(
       `update stories
        set summary = $2,
+           preview_text = $3,
+           preview_type = $4,
+           preview_confidence = $5,
+           preview_reason = $6,
            updated_at = now()
        where id = $1`,
-      [row.story_id, finalStorySummary]
+      [
+        row.story_id,
+        finalStorySummary,
+        preview.text,
+        preview.type,
+        preview.confidence,
+        preview.reason
+      ]
     );
 
     const storyTitle = (row.story_title as string | null) ?? "";
