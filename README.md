@@ -38,7 +38,9 @@ Techmeme for US K-12 education news.
 - Story previews are confidence-gated via `preview_type` and `preview_confidence`; fallback/synthetic output is stored for debugging but displayed as headline-only.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Story grouping by title key.
-- Basic education-specific ranking rubric.
+- Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
+- Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
+- Ranking transparency in QA output (lead reason + score breakdown) for fast tuning.
 - Admin controls for feeds, sources, and story status.
 
 ## Current Gaps (Why Quality Regressions Happen)
@@ -92,12 +94,14 @@ Techmeme for US K-12 education news.
 Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 
 ## Local QA Loop (No Commit Needed)
+- Run from repo root: `/Users/andydue/Desktop/pulsev2`
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - What it does:
   - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),
   - prints ingest JSON stats,
-  - prints a summary-quality report (blank preview count, near-duplicate count, top preview list).
+  - prints a summary-quality report (blank preview count, near-duplicate count, lead eligibility diagnostics, and top preview list).
+- If you see `Failed to connect to localhost port 3000`, start/restart `npm run dev:web` first.
 - Optional knobs:
   - `QA_BASE_URL` (default `http://localhost:3000`)
   - `QA_STORY_LIMIT` (default `20`)

@@ -1,6 +1,11 @@
 import "server-only";
 import { pool } from "./db";
-import { scoreStory, storyMatchesAudience, type Audience } from "./ranking";
+import {
+  analyzeStoryRanking,
+  storyMatchesAudience,
+  type Audience,
+  type StoryType
+} from "./ranking";
 
 function normalizeTitleCase(title: string) {
   const trimmed = title.trim();
@@ -100,6 +105,12 @@ const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
 
+const TRAILING_BOILERPLATE_PATTERNS = [
+  /\bthe post\b[\s\S]{0,240}?\bappeared first on\b[\s\S]*$/i,
+  /\bthis article (?:was )?originally (?:appeared|published) on\b[\s\S]*$/i,
+  /\boriginally published (?:on|at)\b[\s\S]*$/i
+];
+
 const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
 
 function clamp(value: number, min: number, max: number) {
@@ -120,6 +131,11 @@ function normalizeSummary(summary: string | null | undefined) {
     .replace(/\s+/g, " ")
     .trim();
 
+  for (const pattern of TRAILING_BOILERPLATE_PATTERNS) {
+    cleaned = cleaned.replace(pattern, " ").trim();
+  }
+
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
   if (!cleaned) return null;
 
   const lowered = cleaned.toLowerCase();
@@ -167,6 +183,11 @@ export type StoryRow = {
   avg_weight: number;
   latest_at: string;
   score: number;
+  story_type?: StoryType;
+  lead_eligible?: boolean;
+  lead_reason?: string | null;
+  lead_urgency_override?: boolean;
+  score_breakdown?: string;
   matches_audience?: boolean;
 };
 
@@ -275,6 +296,19 @@ function dedupeStorySummariesForDisplay(stories: StoryRow[]) {
       summary: chosen
     };
   });
+}
+
+function chooseLeadStory(stories: StoryRow[]) {
+  if (stories.length <= 1) return stories;
+  if (stories[0]?.status === "pinned") return stories;
+
+  const eligibleIndex = stories.findIndex((story) => story.lead_eligible);
+  if (eligibleIndex <= 0) return stories;
+
+  const [lead] = stories.splice(eligibleIndex, 1);
+  if (!lead) return stories;
+  stories.unshift(lead);
+  return stories;
 }
 
 export async function getTopStories(limit = 20, audience?: Audience): Promise<StoryRow[]> {
@@ -407,13 +441,16 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
 
       const resolvedSummary = editorSummary ?? autoSummary;
       const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
-      let score = scoreStory({
+      const ranking = analyzeStoryRanking({
         title: row.editor_title ?? row.title,
         summary: resolvedSummary,
         articleCount: Number(row.article_count),
+        sourceCount: Number(row.source_count),
+        recentCount: Number(row.recent_count),
         avgWeight: Number(row.avg_weight),
         latestAt: new Date(row.latest_at)
       });
+      let score = ranking.score;
 
       if (!editorSummary) {
         if (!autoSummary) {
@@ -436,6 +473,11 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
         recent_count: Number(row.recent_count),
         avg_weight: Number(row.avg_weight),
         score,
+        story_type: ranking.storyType,
+        lead_eligible: ranking.leadEligible,
+        lead_reason: ranking.leadReason,
+        lead_urgency_override: ranking.urgencyOverride,
+        score_breakdown: JSON.stringify(ranking.breakdown),
         matches_audience: audience ? storyMatchesAudience(text, audience) : true
       };
     });
@@ -451,7 +493,8 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
     ...rest.sort((a, b) => b.score - a.score)
   ].slice(0, limit);
 
-  return dedupeStorySummariesForDisplay(ranked);
+  const leadAdjusted = chooseLeadStory([...ranked]);
+  return dedupeStorySummariesForDisplay(leadAdjusted);
 }
 
 export async function getStoryById(id: string): Promise<StoryByIdResult | null> {

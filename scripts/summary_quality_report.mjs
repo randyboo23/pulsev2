@@ -24,6 +24,71 @@ const DISPLAY_SYNTHETIC_FALLBACK_PATTERNS = [
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
 
+const TRAILING_BOILERPLATE_PATTERNS = [
+  /\bthe post\b[\s\S]{0,240}?\bappeared first on\b[\s\S]*$/i,
+  /\bthis article (?:was )?originally (?:appeared|published) on\b[\s\S]*$/i,
+  /\boriginally published (?:on|at)\b[\s\S]*$/i
+];
+
+const KEYWORDS = {
+  impact: ["legislation", "bill", "policy", "funding", "budget", "superintendent", "district", "statewide", "board", "mandate"],
+  urgency: ["emergency", "closure", "lockdown", "safety", "security", "threat", "shooting", "outbreak", "urgent"],
+  novelty: ["pilot", "launch", "new", "first", "rollout", "initiative", "program", "expansion"],
+  relevance: ["teacher", "students", "classroom", "curriculum", "school", "k-12", "k12", "principal", "edtech"]
+};
+
+const BREAKING_HINTS = [
+  "breaking",
+  "just announced",
+  "emergency",
+  "court blocks",
+  "lawsuit",
+  "injunction",
+  "passes house",
+  "passes senate",
+  "signed into law",
+  "state of emergency",
+  "closure"
+];
+
+const POLICY_HINTS = [
+  "policy",
+  "bill",
+  "law",
+  "mandate",
+  "regulation",
+  "funding",
+  "budget",
+  "board",
+  "superintendent",
+  "federal",
+  "state"
+];
+
+const OPINION_HINTS = [
+  "opinion",
+  "op-ed",
+  "analysis",
+  "commentary",
+  "essay",
+  "guest column",
+  "letter to the editor"
+];
+
+const EVERGREEN_HINTS = [
+  "how to",
+  "guide",
+  "tips",
+  "checklist",
+  "strategies",
+  "lesson plan",
+  "best practices",
+  "classroom management",
+  "worksheets",
+  "activities",
+  "explainer"
+];
+
 const SUMMARY_DEDUPE_STOPWORDS = new Set([
   "that",
   "this",
@@ -129,6 +194,10 @@ function normalizeSummary(summary) {
     .replace(/\s+/g, " ")
     .trim();
 
+  for (const pattern of TRAILING_BOILERPLATE_PATTERNS) {
+    cleaned = cleaned.replace(pattern, " ").trim();
+  }
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
   if (!cleaned) return null;
 
   const lowered = cleaned.toLowerCase();
@@ -163,26 +232,86 @@ function countHits(text, terms) {
   return terms.reduce((count, term) => (lowered.includes(term) ? count + 1 : count), 0);
 }
 
-function scoreStory(inputs) {
-  const keywords = {
-    impact: ["legislation", "bill", "policy", "funding", "budget", "superintendent", "district", "statewide", "board", "mandate"],
-    urgency: ["emergency", "closure", "lockdown", "safety", "security", "threat", "shooting", "outbreak", "urgent"],
-    novelty: ["pilot", "launch", "new", "first", "rollout", "initiative", "program", "expansion"],
-    relevance: ["teacher", "students", "classroom", "curriculum", "school", "k-12", "k12", "principal", "edtech"]
-  };
+function classifyStoryType(text, weakEvergreenSignals) {
+  if (countHits(text, OPINION_HINTS) > 0) return "opinion";
+  if (countHits(text, BREAKING_HINTS) > 0) return "breaking";
+  if (countHits(text, POLICY_HINTS) > 0) return "policy";
+  if (countHits(text, EVERGREEN_HINTS) > 0 && weakEvergreenSignals) return "evergreen";
+  return "feature";
+}
 
+function analyzeStoryRanking(inputs) {
   const text = `${inputs.title} ${inputs.summary ?? ""}`;
-  const impact = Math.min(countHits(text, keywords.impact), 3);
-  const urgency = Math.min(countHits(text, keywords.urgency), 3);
-  const novelty = Math.min(countHits(text, keywords.novelty), 3);
-  const relevance = Math.min(countHits(text, keywords.relevance), 3);
+  const impact = Math.min(countHits(text, KEYWORDS.impact), 3);
+  const urgency = Math.min(countHits(text, KEYWORDS.urgency), 3);
+  const novelty = Math.min(countHits(text, KEYWORDS.novelty), 3);
+  const relevance = Math.min(countHits(text, KEYWORDS.relevance), 3);
 
+  const sourceCount = Number.isFinite(inputs.sourceCount ?? 0) ? Number(inputs.sourceCount ?? 0) : 0;
+  const recentCount = Number.isFinite(inputs.recentCount ?? 0) ? Number(inputs.recentCount ?? 0) : 0;
   const volume = Math.log1p(inputs.articleCount);
+  const sourceDiversity = Math.log1p(Math.max(0, sourceCount));
   const hoursSince = (Date.now() - inputs.latestAt.getTime()) / (1000 * 60 * 60);
-  const recencyBoost = 0.6 + 0.4 * Math.exp(-hoursSince / 48);
+  const recency = 1.1 * Math.exp(-hoursSince / 30);
+  const weakEvergreenSignals = hoursSince > 18 && sourceCount <= 1 && recentCount <= 1;
+  const storyType = classifyStoryType(text, weakEvergreenSignals);
+  const urgencyOverride = urgency > 0 && (hoursSince <= 6 || recentCount >= 2);
+  const evergreenPenalty = storyType === "evergreen" && !urgencyOverride ? 0.45 : 1;
+  const weightMultiplier = Math.max(0.75, Math.min(1.25, inputs.avgWeight));
 
-  const base = impact * 2.0 + urgency * 1.5 + novelty * 1.2 + relevance * 1.0 + volume * 0.8;
-  return Number((base * inputs.avgWeight * recencyBoost).toFixed(2));
+  const base =
+    impact * 2.2 +
+    urgency * 1.8 +
+    novelty * 1.0 +
+    relevance * 1.0 +
+    volume * 0.9 +
+    sourceDiversity * 0.7 +
+    recency;
+  const score = base * weightMultiplier * evergreenPenalty;
+
+  let leadEligible = true;
+  let leadReason = null;
+  if (storyType === "evergreen" && !urgencyOverride) {
+    leadEligible = false;
+    leadReason = "evergreen_weak_signal";
+  } else if (storyType === "opinion" && !urgencyOverride) {
+    leadEligible = false;
+    leadReason = "opinion_demoted";
+  }
+
+  return {
+    score: Number(score.toFixed(2)),
+    storyType,
+    leadEligible,
+    leadReason,
+    urgencyOverride,
+    breakdown: {
+      impact,
+      urgency,
+      novelty,
+      relevance,
+      volume: Number(volume.toFixed(2)),
+      sourceDiversity: Number(sourceDiversity.toFixed(2)),
+      recency: Number(recency.toFixed(2)),
+      avgWeight: Number(weightMultiplier.toFixed(2)),
+      evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
+      weakEvergreenSignals,
+      hoursSince: Number(hoursSince.toFixed(2))
+    }
+  };
+}
+
+function chooseLeadStory(stories) {
+  if (stories.length <= 1) return stories;
+  if (stories[0]?.status === "pinned") return stories;
+
+  const eligibleIndex = stories.findIndex((story) => story.lead_eligible);
+  if (eligibleIndex <= 0) return stories;
+
+  const [lead] = stories.splice(eligibleIndex, 1);
+  if (!lead) return stories;
+  stories.unshift(lead);
+  return stories;
 }
 
 function summaryDedupTokens(summary) {
@@ -337,13 +466,16 @@ async function run() {
         const resolvedSummary = editorSummary ?? autoSummary;
         const resolvedPreviewType = editorSummary ? "full" : autoPreviewType;
         const resolvedPreviewConfidence = editorSummary ? 1 : autoPreviewConfidence;
-        let score = scoreStory({
+        const ranking = analyzeStoryRanking({
           title: row.editor_title ?? row.title,
           summary: resolvedSummary,
           articleCount: Number(row.article_count),
+          sourceCount: Number(row.source_count),
+          recentCount: Number(row.recent_count),
           avgWeight: Number(row.avg_weight),
           latestAt: new Date(row.latest_at)
         });
+        let score = ranking.score;
 
         if (!editorSummary) {
           if (!autoSummary) {
@@ -360,7 +492,14 @@ async function run() {
           preview_confidence: resolvedPreviewConfidence,
           editor_summary: editorSummary,
           article_count: Number(row.article_count),
-          score
+          source_count: Number(row.source_count),
+          recent_count: Number(row.recent_count),
+          score,
+          story_type: ranking.storyType,
+          lead_eligible: ranking.leadEligible,
+          lead_reason: ranking.leadReason,
+          lead_urgency_override: ranking.urgencyOverride,
+          score_breakdown: ranking.breakdown
         };
       });
 
@@ -370,8 +509,9 @@ async function run() {
       ...pinned.sort((a, b) => b.score - a.score),
       ...rest.sort((a, b) => b.score - a.score)
     ].slice(0, TOP_LIMIT);
+    const leadAdjusted = chooseLeadStory([...ranked]);
 
-    const displayRows = dedupeStorySummariesForDisplay(ranked);
+    const displayRows = dedupeStorySummariesForDisplay(leadAdjusted);
     const summaries = displayRows
       .map((story) => story.editor_summary ?? story.summary)
       .filter(Boolean);
@@ -404,6 +544,9 @@ async function run() {
       DISPLAY_SYNTHETIC_FALLBACK_PATTERNS.some((pattern) => pattern.test(summary))
     ).length;
     const blankShown = displayRows.filter((story) => !(story.editor_summary ?? story.summary)).length;
+    const leadStory = displayRows[0] ?? null;
+    const leadEligibilityIssues =
+      leadStory && !leadStory.lead_eligible && displayRows.some((story, idx) => idx > 0 && story.lead_eligible);
 
     console.log(`Simulated homepage set: ${displayRows.length} stories (top limit ${TOP_LIMIT})`);
     console.log(`- Blank previews after filters/dedupe: ${blankShown}`);
@@ -422,6 +565,27 @@ async function run() {
       const methods = methodStats.map((row) => `${row.method}:${row.count}`).join(", ");
       console.log(`- Article summary_choice_method (last 24h): ${methods}`);
     }
+
+    if (leadStory) {
+      const leadTitle = String(leadStory.editor_title ?? leadStory.title ?? "").trim();
+      console.log(
+        `- Lead story: "${leadTitle}" (type=${leadStory.story_type}, eligible=${leadStory.lead_eligible}, reason=${leadStory.lead_reason ?? "ok"})`
+      );
+      console.log(`  score=${leadStory.score} breakdown=${JSON.stringify(leadStory.score_breakdown)}`);
+    }
+    if (leadEligibilityIssues) {
+      console.log("- WARNING: lead story is not eligible while another eligible story exists.");
+    }
+
+    console.log("");
+    console.log("Top ranking breakdown:");
+    displayRows.slice(0, Math.min(5, displayRows.length)).forEach((story, index) => {
+      const title = String(story.editor_title ?? story.title ?? "").trim();
+      console.log(
+        `${index + 1}. score=${story.score} type=${story.story_type} eligible=${story.lead_eligible} reason=${story.lead_reason ?? "ok"}`
+      );
+      console.log(`   ${truncate(title, 120)}`);
+    });
 
     console.log("");
     console.log(`Top ${Math.min(SHOW_LIMIT, displayRows.length)} previews:`);

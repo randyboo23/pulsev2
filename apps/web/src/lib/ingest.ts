@@ -508,6 +508,12 @@ const SYNTHETIC_FALLBACK_PATTERNS = [
   /^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i
 ];
 
+const TRAILING_BOILERPLATE_PATTERNS = [
+  /\bthe post\b[\s\S]{0,240}?\bappeared first on\b[\s\S]*$/i,
+  /\bthis article (?:was )?originally (?:appeared|published) on\b[\s\S]*$/i,
+  /\boriginally published (?:on|at)\b[\s\S]*$/i
+];
+
 function isSyntheticFallbackSummary(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -756,6 +762,11 @@ function sanitizeSummary(text: string) {
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  for (const pattern of TRAILING_BOILERPLATE_PATTERNS) {
+    cleaned = cleaned.replace(pattern, " ").trim();
+  }
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
 
   for (const pattern of SUMMARY_JUNK_PATTERNS) {
     if (pattern.test(cleaned)) {
