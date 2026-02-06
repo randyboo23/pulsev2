@@ -117,7 +117,7 @@ const CURATED_RSS_FEEDS: FeedEntry[] = [
     url: "https://www.edutopia.org/",
     sourceName: "Edutopia",
     domain: "edutopia.org",
-    tier: "B",
+    tier: "C",
     feedType: "scrape"
   },
   {

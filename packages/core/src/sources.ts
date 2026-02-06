@@ -4,7 +4,6 @@ export const TRUSTED_SITES = [
   "chalkbeat.org",
   "edsurge.com",
   "hechingerreport.org",
-  "edutopia.org",
   "kqed.org",
   "edsource.org",
   "ednc.org",
@@ -77,7 +76,6 @@ export const SOURCE_TIERS = {
       "educationweek.org",
       "edsurge.com",
       "hechingerreport.org",
-      "edutopia.org",
       "eschoolnews.com",
       "districtadministration.com",
       "brookings.edu",
@@ -98,6 +96,7 @@ export const SOURCE_TIERS = {
   },
   tierC: {
     domains: [
+      "edutopia.org",
       "patch.com",
       "examiner.com",
       "msn.com",

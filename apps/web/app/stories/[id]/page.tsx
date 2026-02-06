@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getStoryById } from "@/src/lib/stories";
+import { getStoryById, type StoryArticleRow } from "@/src/lib/stories";
 
 function formatDate(dateString: string | null) {
   if (!dateString) return "Unknown date";
@@ -20,6 +20,29 @@ function formatShortDate(dateString: string | null) {
   }).format(date);
 }
 
+function dedupeArticles(articles: StoryArticleRow[]) {
+  const seen = new Map<string, boolean>();
+  return articles.filter((article) => {
+    // Dedupe by exact URL
+    const normalUrl = article.url.replace(/\/$/, "").toLowerCase();
+    if (seen.has(normalUrl)) return false;
+    seen.set(normalUrl, true);
+
+    // Dedupe by source + similar headline (same source, titles differ only by casing/punctuation)
+    const sourceKey = (article.source_name ?? "").toLowerCase();
+    const titleKey = (article.title ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const dedupKey = `${sourceKey}::${titleKey}`;
+    if (seen.has(dedupKey)) return false;
+    seen.set(dedupKey, true);
+
+    return true;
+  });
+}
+
 export default async function StoryPage({
   params
 }: {
@@ -31,7 +54,8 @@ export default async function StoryPage({
     notFound();
   }
 
-  const { story, articles } = result;
+  const { story, articles: rawArticles } = result;
+  const articles = dedupeArticles(rawArticles);
   const title = story.editor_title ?? story.title;
   const summary =
     story.editor_summary ??
