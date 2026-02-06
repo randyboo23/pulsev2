@@ -1,0 +1,26 @@
+name: Ingest Cron
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ingest-cron
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trigger ingest endpoint
+        env:
+          INGEST_URL: ${{ secrets.INGEST_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$INGEST_URL"
+          test -n "$CRON_SECRET"
+          curl -f -sS --show-error --max-time 900 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$INGEST_URL"

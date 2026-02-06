@@ -78,6 +78,10 @@ Techmeme for US K-12 education news.
 - Set `CRON_SECRET` in your deployment env vars.
 - Scheduler request format: `GET /api/ingest` with `Authorization: Bearer <CRON_SECRET>`.
 - Vercel Hobby supports daily cron only; use an external scheduler for 30-minute cadence.
+- `cron-job.org` currently has a 30-second timeout and is not suitable for this ingest duration.
+- Recommended for Hobby: GitHub Actions scheduler (`.github/workflows/ingest-cron.yml`) with secrets:
+  - `INGEST_URL` = `https://<your-domain>/api/ingest`
+  - `CRON_SECRET` = same bearer secret used by `/api/ingest`
 - `/api/ingest` also accepts manual `POST` with `x-ingest-secret` for debugging.
 - `/admin/stories` -> `Backfill story briefs (manual)` is a recovery tool, not the daily workflow.
 
