@@ -21,12 +21,23 @@ Last updated:
 - Fallback/synthetic text is stored for debugging but not shown to users.
 - If preview confidence is low, render headline-only.
 - Headline-only is preferred over generic filler blurbs.
+- Legacy synthetic phrasing classes (`coverage is converging on ...`, generic `why it matters` tails) are explicitly suppressed.
+
+## Current Ranking Policy
+- Ranking is deterministic with explainable breakdown fields.
+- `story_type` is emitted as `breaking | policy | feature | evergreen | opinion`.
+- Lead eligibility is explicit (`lead_eligible`, `lead_reason`) and used to avoid weak lead picks.
+- Source authority now has stronger impact (nonlinear multiplier from source weight).
+- Single-source low-authority clusters are demoted.
+- Low-newsworthiness feature clusters (single-source, low-urgency, non-policy) are demoted by hard-news gate.
+- Instructional evergreen content should not occupy top/lead slots unless urgency override signals exist.
+- Malformed/generic titles (`slug permalinkurl...`, etc.) are filtered from ranked stories and wire display.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
 - Manual `/admin/stories` backfill is recovery-only, not daily workflow.
 - Current quality regressions come from weak input + forced fallback text.
-- Phase 1 focus is confidence gating and preview suppression of synthetic/fallback.
+- Runtime path remains in `apps/web`; `apps/worker` is deferred.
 
 ## Working Agreements
 - Claude owns design/UI treatment.
@@ -34,10 +45,10 @@ Last updated:
 - Backend should pass clear rendering signals to UI (`preview_type`, `preview_confidence`).
 
 ## Near-Term Priorities
-- Stabilize preview quality with `headline_only` fallback behavior.
-- Add candidate adjudication quality metrics and monitoring.
-- Improve clustering/ranking after summary quality is stable.
+- Validate hard-news gate behavior on live ingest runs and tune thresholds.
+- Add AI top-N reranker for editorial gravity (`scope`, `urgency`, `authority`, `audience_fit`).
+- Improve clustering beyond lexical `story_key` when ranking quality stabilizes.
 
 ## Open Questions
-- Final threshold for low-confidence preview suppression.
-- Hero slot rules when top-ranked story is `headline_only`.
+- Final threshold values for hard-news gate penalties.
+- Whether to add a strict `story_type=evergreen` exclusion from lead slots in all cases.
