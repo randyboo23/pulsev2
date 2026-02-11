@@ -2,6 +2,7 @@ import { ingestFeeds } from "@/src/lib/ingest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function isAuthorized(request: Request) {
   const ingestSecret = process.env.INGEST_SECRET;

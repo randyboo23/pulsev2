@@ -49,7 +49,7 @@ export default function AboutPage() {
           <p>
             Want the week&apos;s top stories in your inbox?{" "}
             <a
-              href="https://www.pulsek12.com/"
+              href={process.env.NEXT_PUBLIC_NEWSLETTER_URL ?? "https://newsletter.pulsek12.com"}
               target="_blank"
               rel="noopener"
             >

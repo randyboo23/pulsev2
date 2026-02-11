@@ -1,10 +1,11 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import Script from "next/script";
 import { isAdmin } from "@/src/lib/admin";
 import { NewsletterForm } from "@/src/components/NewsletterForm";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://pulsek12.com"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulsek12.com"),
   title: {
     default: "Pulse K-12 | The Signal in Education News",
     template: "%s | Pulse K-12"
@@ -37,13 +38,21 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        {process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN && (
+          <Script
+            defer
+            data-domain={process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN}
+            src="https://plausible.io/js/script.js"
+            strategy="afterInteractive"
+          />
+        )}
         {children}
         <footer className="site-footer">
           <div className="footer-content">
             <span className="footer-brand">Pulse K-12</span>
             <nav className="footer-links">
               <a href="/" className="footer-link">Headlines</a>
-              <a href="https://www.pulsek12.com/" className="footer-link" target="_blank" rel="noopener">Newsletter</a>
+              <a href={process.env.NEXT_PUBLIC_NEWSLETTER_URL ?? "https://newsletter.pulsek12.com"} className="footer-link" target="_blank" rel="noopener">Newsletter</a>
               <a href="/about" className="footer-link">About</a>
               {showAdmin && (
                 <a href="/admin/stories" className="footer-link">

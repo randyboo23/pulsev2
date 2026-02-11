@@ -67,11 +67,7 @@ export default async function HomePage({
       {/* Navigation */}
       <nav className="nav-bar">
         <a href="/" className="nav-link active">Top Stories</a>
-        <a href="/" className="nav-link">Policy</a>
-        <a href="/" className="nav-link">Classroom</a>
-        <a href="/" className="nav-link">EdTech</a>
-        <a href="/" className="nav-link">Leadership</a>
-        <a href="https://www.pulsek12.com/" className="nav-link" target="_blank" rel="noopener">Newsletter</a>
+        <a href={process.env.NEXT_PUBLIC_NEWSLETTER_URL ?? "https://newsletter.pulsek12.com"} className="nav-link" target="_blank" rel="noopener">Newsletter</a>
       </nav>
 
       {/* Newsletter Signup Bar */}
