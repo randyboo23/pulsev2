@@ -176,3 +176,30 @@ create trigger set_stories_updated_at
 before update on stories
 for each row
 execute function set_updated_at();
+
+-- Enable Row Level Security (permissive policies for server-side access)
+alter table sources enable row level security;
+alter table feeds enable row level security;
+alter table admin_events enable row level security;
+alter table articles enable row level security;
+alter table stories enable row level security;
+alter table story_articles enable row level security;
+
+-- Permissive policies (allow all operations - we use server-side auth)
+drop policy if exists "Allow all" on sources;
+create policy "Allow all" on sources for all using (true) with check (true);
+
+drop policy if exists "Allow all" on feeds;
+create policy "Allow all" on feeds for all using (true) with check (true);
+
+drop policy if exists "Allow all" on admin_events;
+create policy "Allow all" on admin_events for all using (true) with check (true);
+
+drop policy if exists "Allow all" on articles;
+create policy "Allow all" on articles for all using (true) with check (true);
+
+drop policy if exists "Allow all" on stories;
+create policy "Allow all" on stories for all using (true) with check (true);
+
+drop policy if exists "Allow all" on story_articles;
+create policy "Allow all" on story_articles for all using (true) with check (true);

@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-02-06
+Last updated: 2026-02-11
 
 ---
 
@@ -93,3 +93,4 @@ Last updated: 2026-02-06
 - 2026-02-06: Fixed story detail page to not repeat summary for single-source stories.
 - 2026-02-06: Fixed headline normalization to apply title case to lowercase headlines.
 - 2026-02-06: Deprioritized Edutopia to lowest source tier.
+- 2026-02-11: Enabled RLS on all tables with permissive policies (server-side auth only, no browser client).
