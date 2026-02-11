@@ -1,10 +1,30 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { isAdmin } from "@/src/lib/admin";
+import { NewsletterForm } from "@/src/components/NewsletterForm";
 
 export const metadata: Metadata = {
-  title: "Pulse K-12 | The Signal in Education News",
-  description: "A shared homepage for US education news, clustered and ranked by impact."
+  metadataBase: new URL("https://pulsek12.com"),
+  title: {
+    default: "Pulse K-12 | The Signal in Education News",
+    template: "%s | Pulse K-12"
+  },
+  description:
+    "AI-curated K-12 education news. The most important stories in American education, clustered and ranked by impact.",
+  openGraph: {
+    type: "website",
+    siteName: "Pulse K-12",
+    title: "Pulse K-12 | The Signal in Education News",
+    description:
+      "AI-curated K-12 education news. The most important stories in American education, clustered and ranked by impact.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Pulse K-12 | The Signal in Education News",
+    description:
+      "AI-curated K-12 education news. The most important stories in American education, clustered and ranked by impact."
+  },
+  robots: { index: true, follow: true }
 };
 
 export default function RootLayout({
@@ -23,7 +43,7 @@ export default function RootLayout({
             <span className="footer-brand">Pulse K-12</span>
             <nav className="footer-links">
               <a href="/" className="footer-link">Headlines</a>
-              <a href="/newsletter" className="footer-link">Newsletter</a>
+              <a href="https://www.pulsek12.com/" className="footer-link" target="_blank" rel="noopener">Newsletter</a>
               <a href="/about" className="footer-link">About</a>
               {showAdmin && (
                 <a href="/admin/stories" className="footer-link">
@@ -40,18 +60,7 @@ export default function RootLayout({
                   Get the week&apos;s most important K-12 news in your inbox every Friday.
                 </p>
               </div>
-              <form className="footer-newsletter-form" action="/api/newsletter/subscribe" method="POST">
-                <input
-                  type="email"
-                  name="email"
-                  className="footer-newsletter-input"
-                  placeholder="Your email address"
-                  required
-                />
-                <button type="submit" className="footer-newsletter-button">
-                  Subscribe
-                </button>
-              </form>
+              <NewsletterForm variant="footer" />
             </div>
           </div>
         </footer>

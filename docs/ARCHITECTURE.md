@@ -66,16 +66,10 @@ Homepage (page.tsx) -- getTopStories() serves ranked stories with preview contra
 | `/stories/[id]` | Complete | Story detail with sources list (deduped for single-source stories) |
 | `/admin/stories` | Functional | Uses legacy classes, works fine |
 | `/admin/sources` | Functional | Uses legacy classes |
-| `/newsletter` | **Needs page** | Nav link exists, page doesn't |
+| `/about` | Complete | Editorial about page |
+| `/newsletter` | External | Nav/footer link to Beehiiv newsletter (pulsek12.com) |
 
 ## Pending Features
-
-### Newsletter Subscription
-- **Location**: Above-fold bar + footer form
-- **Forms POST to**: `/api/newsletter/subscribe`
-- **Expected payload**: `{ email: string }`
-- **Expected response**: `{ success: boolean; message?: string }`
-- **Tasks**: Create subscribers table, endpoint, email service integration, optional double opt-in
 
 ### Category Filtering (Future)
 - **Location**: Nav bar links (Policy, Classroom, EdTech, Leadership)
@@ -98,12 +92,19 @@ apps/web/
     page.tsx                 # Homepage
     stories/[id]/page.tsx    # Story detail page
     admin/                   # Admin pages
+    about/page.tsx           # About page
+    error.tsx                # Error boundary
+    not-found.tsx            # Custom 404
+    loading.tsx              # Loading state
+    robots.ts                # robots.txt
+    sitemap.ts               # Dynamic sitemap
+    opengraph-image.tsx      # Auto-generated OG image
     api/
       ingest/route.ts        # Ingest endpoint (GET + POST)
-      generate-summaries/route.ts
+      newsletter/subscribe/route.ts  # Beehiiv subscribe proxy
+      admin/generate-summaries/route.ts
       admin/cleanup-international/route.ts
-      login/route.ts
-      stories/route.ts
+      admin/login/route.ts
   src/lib/
     ingest.ts                # Ingestion pipeline + free scrape + Firecrawl
     articles.ts              # Article queries + quality classification
@@ -114,7 +115,8 @@ apps/web/
     sources.ts               # Source tiers (moved to packages/core)
     admin.ts                 # Admin logic
     db.ts                    # Database connection
-  src/components/            # UI components
+  src/components/
+    NewsletterForm.tsx       # Client-side Beehiiv subscribe form
   src/styles/                # Additional styles
   src/types/                 # Local type definitions
 
@@ -147,7 +149,8 @@ scripts/
 - Fallback/synthetic text stored for debugging but not shown to users.
 
 ## Notes
-- Frontend forms use native HTML form submission (action + method).
+- Newsletter subscribe uses Beehiiv API via server-side proxy (`/api/newsletter/subscribe`). Requires `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID` env vars.
+- SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.
 

@@ -65,6 +65,7 @@ Techmeme for US K-12 education news.
 2. Optional for AI adjudication/generation: set `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_MODEL`).
 3. Optional for scrape candidate summaries: set `FIRECRAWL_API_KEY`.
 4. Optional for scheduled GET calls: set `CRON_SECRET`.
+5. Optional for newsletter subscribe: set `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID`.
 5. Run SQL from `db/schema.sql`.
 6. POST to `/api/ingest` with header `x-ingest-secret`.
 

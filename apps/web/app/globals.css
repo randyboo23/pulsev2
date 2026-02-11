@@ -270,6 +270,8 @@ a:hover {
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
 }
 
 .newsletter-bar-button:hover {
@@ -362,6 +364,61 @@ a:hover {
 
 .footer-newsletter-button:hover {
   background: var(--ink-soft);
+}
+
+/* Newsletter form messages */
+.newsletter-message {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.newsletter-success {
+  color: #2d8a4e;
+}
+
+.newsletter-error {
+  color: var(--accent);
+}
+
+.newsletter-bar-message {
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--paper);
+  text-align: center;
+}
+
+.newsletter-bar-message.newsletter-error {
+  color: #ff9b9b;
+}
+
+/* ===========================================
+   ABOUT PAGE
+   =========================================== */
+
+.about-content {
+  max-width: 680px;
+  margin: var(--space-xl) auto 0;
+  padding: 0 var(--space-lg);
+}
+
+.about-content p {
+  font-family: var(--font-body);
+  font-size: 1.1rem;
+  line-height: 1.75;
+  color: var(--ink-soft);
+  margin: 0 0 var(--space-lg);
+}
+
+.about-content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.about-content a:hover {
+  color: var(--accent-dark);
 }
 
 /* ===========================================
@@ -1215,6 +1272,7 @@ a:hover {
 
   .newsletter-bar-button {
     width: 100%;
+    text-align: center;
   }
 
   .footer-newsletter-inner {

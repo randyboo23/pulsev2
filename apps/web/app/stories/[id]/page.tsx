@@ -1,5 +1,36 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getStoryById, type StoryArticleRow } from "@/src/lib/stories";
+
+export async function generateMetadata({
+  params
+}: {
+  params: { id: string };
+}): Promise<Metadata> {
+  const result = await getStoryById(params.id);
+  if (!result) return {};
+
+  const title = result.story.editor_title ?? result.story.title;
+  const description =
+    result.story.editor_summary ??
+    result.story.summary ??
+    "Coverage from multiple sources on Pulse K-12.";
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "article"
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description
+    }
+  };
+}
 
 function formatDate(dateString: string | null) {
   if (!dateString) return "Unknown date";

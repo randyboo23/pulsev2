@@ -1,5 +1,6 @@
 import { getTopStories } from "@/src/lib/stories";
 import { getRecentArticles } from "@/src/lib/articles";
+import { NewsletterForm } from "@/src/components/NewsletterForm";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ export default async function HomePage({
         <a href="/" className="nav-link">Classroom</a>
         <a href="/" className="nav-link">EdTech</a>
         <a href="/" className="nav-link">Leadership</a>
-        <a href="/newsletter" className="nav-link">Newsletter</a>
+        <a href="https://www.pulsek12.com/" className="nav-link" target="_blank" rel="noopener">Newsletter</a>
       </nav>
 
       {/* Newsletter Signup Bar */}
@@ -82,18 +83,7 @@ export default async function HomePage({
               <strong>The weekly briefing</strong> for K-12 leaders
             </span>
           </div>
-          <form className="newsletter-bar-form" action="/api/newsletter/subscribe" method="POST">
-            <input
-              type="email"
-              name="email"
-              className="newsletter-bar-input"
-              placeholder="Enter your email"
-              required
-            />
-            <button type="submit" className="newsletter-bar-button">
-              Subscribe
-            </button>
-          </form>
+          <NewsletterForm variant="bar" />
         </div>
       </div>
 
