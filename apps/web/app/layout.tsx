@@ -68,7 +68,7 @@ export default function RootLayout({
               <div className="footer-newsletter-text">
                 <h3 className="footer-newsletter-title">Stay informed</h3>
                 <p className="footer-newsletter-desc">
-                  Get the week&apos;s most important K-12 news in your inbox every Friday.
+                  Get the week&apos;s most important K-12 news in your inbox every Sunday.
                 </p>
               </div>
               <NewsletterForm variant="footer" />
