@@ -50,6 +50,59 @@ const TOKEN_ALIASES: Record<string, string[]> = {
   supe: ["superintendent"]
 };
 
+const TOKEN_CANONICAL: Record<string, string> = {
+  sue: "lawsuit",
+  sues: "lawsuit",
+  sued: "lawsuit",
+  suing: "lawsuit",
+  lawsuit: "lawsuit",
+  lawsuits: "lawsuit",
+  filed: "lawsuit",
+  filing: "lawsuit",
+  challenge: "lawsuit",
+  challenges: "lawsuit",
+  challenged: "lawsuit",
+  close: "closure",
+  closes: "closure",
+  closed: "closure",
+  closing: "closure",
+  closure: "closure",
+  closures: "closure",
+  vote: "vote",
+  votes: "vote",
+  voted: "vote",
+  voting: "vote",
+  approve: "vote",
+  approves: "vote",
+  approved: "vote",
+  raid: "raid",
+  raids: "raid",
+  raided: "raid",
+  warrant: "raid",
+  warrants: "raid",
+  probe: "investigation",
+  probes: "investigation",
+  investigated: "investigation",
+  investigation: "investigation",
+  investigations: "investigation"
+};
+
+const EVENT_ACTION_TOKENS = new Set([
+  "lawsuit",
+  "closure",
+  "vote",
+  "raid",
+  "investigation",
+  "strike",
+  "ban",
+  "funding",
+  "budget",
+  "layoff",
+  "leave"
+]);
+
+const MERGE_EVENT_CLUSTER_THRESHOLD = 0.3;
+
 type MergeCandidateStory = {
   id: string;
   story_key: string | null;
@@ -74,6 +127,12 @@ export type MergeSimilarStoriesResult = {
   evaluatedPairs: number;
   suggested: number;
   merged: number;
+};
+
+type MergeOverlapDetails = {
+  ratio: number;
+  sharedTokens: number;
+  sharedActionTokens: number;
 };
 
 function normalizeTitle(title: string) {
@@ -104,17 +163,28 @@ function normalizeMergeToken(token: string) {
   return normalized;
 }
 
+function canonicalizeMergeToken(token: string) {
+  const raw = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!raw) return "";
+
+  const direct = TOKEN_CANONICAL[raw];
+  if (direct) return direct;
+
+  const normalized = normalizeMergeToken(raw);
+  return TOKEN_CANONICAL[normalized] ?? normalized;
+}
+
 function storyMergeTokens(story: MergeCandidateStory) {
   const expandTokens = (tokens: string[]) => {
     const out: string[] = [];
     for (const token of tokens) {
-      const normalized = normalizeMergeToken(token);
+      const normalized = canonicalizeMergeToken(token);
       if (normalized.length >= 3 && !STOPWORDS.has(normalized)) {
         out.push(normalized);
       }
       const aliases = TOKEN_ALIASES[normalized] ?? [];
       for (const alias of aliases) {
-        const aliasNormalized = normalizeMergeToken(alias);
+        const aliasNormalized = canonicalizeMergeToken(alias);
         if (aliasNormalized.length >= 3 && !STOPWORDS.has(aliasNormalized)) {
           out.push(aliasNormalized);
         }
@@ -128,7 +198,7 @@ function storyMergeTokens(story: MergeCandidateStory) {
   return Array.from(new Set([...titleTokens, ...keyTokens])).slice(0, 24);
 }
 
-function mergeOverlapRatio(a: MergeCandidateStory, b: MergeCandidateStory, cache: Map<string, string[]>) {
+function mergeOverlapDetails(a: MergeCandidateStory, b: MergeCandidateStory, cache: Map<string, string[]>): MergeOverlapDetails {
   const getTokens = (story: MergeCandidateStory) => {
     const cached = cache.get(story.id);
     if (cached) return cached;
@@ -139,16 +209,35 @@ function mergeOverlapRatio(a: MergeCandidateStory, b: MergeCandidateStory, cache
 
   const tokensA = getTokens(a);
   const tokensB = getTokens(b);
-  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  if (tokensA.length === 0 || tokensB.length === 0) {
+    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0 };
+  }
 
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
-  let overlap = 0;
+  let sharedTokens = 0;
+  let sharedActionTokens = 0;
   for (const token of setA) {
-    if (setB.has(token)) overlap += 1;
+    if (setB.has(token)) {
+      sharedTokens += 1;
+      if (EVENT_ACTION_TOKENS.has(token)) sharedActionTokens += 1;
+    }
   }
 
-  return overlap / Math.max(1, Math.min(setA.size, setB.size));
+  return {
+    ratio: sharedTokens / Math.max(1, Math.min(setA.size, setB.size)),
+    sharedTokens,
+    sharedActionTokens
+  };
+}
+
+function shouldMergeStories(details: MergeOverlapDetails, similarityThreshold: number) {
+  if (details.ratio >= similarityThreshold) return true;
+  return (
+    details.ratio >= MERGE_EVENT_CLUSTER_THRESHOLD &&
+    details.sharedTokens >= 2 &&
+    details.sharedActionTokens >= 1
+  );
 }
 
 function hasEditorOverrides(story: MergeCandidateStory) {
@@ -282,7 +371,7 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
   const lookbackDays = Math.max(1, Math.floor(options.lookbackDays ?? 4));
   const candidateLimit = Math.max(20, Math.floor(options.candidateLimit ?? 180));
   const maxMerges = Math.max(0, Math.floor(options.maxMerges ?? 12));
-  const similarityThreshold = Math.min(0.95, Math.max(0.4, options.similarityThreshold ?? 0.62));
+  const similarityThreshold = Math.min(0.95, Math.max(0.3, options.similarityThreshold ?? 0.56));
   const dryRun = Boolean(options.dryRun);
 
   if (maxMerges === 0) {
@@ -329,8 +418,8 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
       if (daysApart > lookbackDays) break;
 
       evaluatedPairs += 1;
-      const overlap = mergeOverlapRatio(a, b, tokenCache);
-      if (overlap < similarityThreshold) continue;
+      const overlap = mergeOverlapDetails(a, b, tokenCache);
+      if (!shouldMergeStories(overlap, similarityThreshold)) continue;
 
       const { target, source } = pickMergeTarget(a, b);
       if (sourceUsed.has(source.id) || sourceUsed.has(target.id)) continue;

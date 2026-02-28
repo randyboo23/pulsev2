@@ -36,7 +36,7 @@ Summary Adjudication -- compare candidates (existing / rss / scrape / llm / fall
     |
     v
 Grouping (grouping.ts) -- lexical title-key matching + similar-story merge pass
-    |                      merge pass uses normalized token overlap to collapse near-duplicate stories
+    |                      merge pass uses event-aware token normalization + overlap and runs multi-pass per ingest
     |                      PLANNED: embedding-based clustering (see docs/embedding-clustering-spec.md)
     |
     v
@@ -44,7 +44,7 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
     |                                relevance, source authority, recency, volume)
     |                                penalties: evergreen, singleton, thin coverage, hard news gate,
     |                                plus alias-aware title-topic similarity penalty for same-event repeats
-    |                                final top-10 event-cluster cap keeps one story per event unless novelty signal is strong
+    |                                final top-20 event-cluster cap keeps one story per event unless novelty signal is strong
     |
     v
 AI Reranking (stories.ts) -- Sonnet reorders top 30 by editorial judgment

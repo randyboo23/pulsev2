@@ -2619,12 +2619,17 @@ export async function ingestFeeds(): Promise<IngestResult> {
 
   const qualityScan = await classifyRecentArticles(3000);
   const grouped = await groupUngroupedArticles();
-  const mergePass = await mergeSimilarStories({
-    lookbackDays: 4,
-    candidateLimit: 220,
-    maxMerges: 16,
-    similarityThreshold: 0.62
-  });
+  let mergedStories = 0;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const mergePass = await mergeSimilarStories({
+      lookbackDays: 5,
+      candidateLimit: 280,
+      maxMerges: 40,
+      similarityThreshold: 0.56
+    });
+    mergedStories += mergePass.merged;
+    if (mergePass.merged === 0) break;
+  }
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
 
   return {
@@ -2635,7 +2640,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     skipped,
     unresolvedGoogleSkipped,
     grouped,
-    mergedStories: mergePass.merged,
+    mergedStories,
     parseFailures,
     qualityChecked: qualityScan.qualityChecked,
     nonArticleBlocked,

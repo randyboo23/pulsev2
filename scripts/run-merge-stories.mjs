@@ -8,7 +8,7 @@
  * - MERGE_LOOKBACK_DAYS (default 45)
  * - MERGE_CANDIDATE_LIMIT (default 500)
  * - MERGE_MAX (default 250)
- * - MERGE_SIMILARITY (default 0.6)
+ * - MERGE_SIMILARITY (default 0.56)
  * - MERGE_DRY_RUN (default false)
  */
 
@@ -28,7 +28,7 @@ const options = {
   lookbackDays: toInt(process.env.MERGE_LOOKBACK_DAYS, 45),
   candidateLimit: toInt(process.env.MERGE_CANDIDATE_LIMIT, 500),
   maxMerges: toInt(process.env.MERGE_MAX, 250),
-  similarityThreshold: toFloat(process.env.MERGE_SIMILARITY, 0.6),
+  similarityThreshold: toFloat(process.env.MERGE_SIMILARITY, 0.56),
   dryRun: String(process.env.MERGE_DRY_RUN ?? "false").toLowerCase() === "true"
 };
 

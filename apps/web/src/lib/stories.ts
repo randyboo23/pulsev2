@@ -389,12 +389,12 @@ const NOVELTY_HINTS = [
   "steps down"
 ];
 
-const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.44;
-const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.62;
+const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.4;
+const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.58;
 const STORY_TOPIC_SOFT_PENALTY = 0.8;
 const STORY_TOPIC_STRONG_PENALTY = 0.62;
-const STORY_EVENT_CLUSTER_THRESHOLD = 0.34;
-const TOP_EVENT_CLUSTER_LIMIT = 10;
+const STORY_EVENT_CLUSTER_THRESHOLD = 0.3;
+const TOP_EVENT_CLUSTER_LIMIT = 20;
 
 type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
 type StoryTopicTokenCache = Map<string, string[]>;
@@ -523,11 +523,9 @@ function hasStrongNoveltySignal(candidate: StoryRow, existing: StoryRow) {
 
   const sourceDelta = Number(candidate.source_count) - Number(existing.source_count);
   const recentDelta = Number(candidate.recent_count) - Number(existing.recent_count);
-  const scoreDelta = Number(candidate.score) - Number(existing.score);
 
-  if (newerByHours >= 8 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
-  if (noveltyHint && newerByHours >= 4) return true;
-  if (noveltyHint && scoreDelta >= 1.5 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
+  if (newerByHours >= 12 && sourceDelta >= 2) return true;
+  if (noveltyHint && newerByHours >= 8 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
 
   return false;
 }
