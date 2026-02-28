@@ -35,14 +35,15 @@ Summary Adjudication -- compare candidates (existing / rss / scrape / llm / fall
     |                    AI adjudication if available, deterministic fallback
     |
     v
-Grouping (grouping.ts) -- currently lexical title-key matching
+Grouping (grouping.ts) -- lexical title-key matching + similar-story merge pass
+    |                      merge pass uses normalized token overlap to collapse near-duplicate stories
     |                      PLANNED: embedding-based clustering (see docs/embedding-clustering-spec.md)
     |
     v
 Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, policy, novelty,
     |                                relevance, source authority, recency, volume)
     |                                penalties: evergreen, singleton, thin coverage, hard news gate,
-    |                                plus title-topic similarity penalty for same-event repeats
+    |                                plus alias-aware title-topic similarity penalty for same-event repeats
     |
     v
 AI Reranking (stories.ts) -- Sonnet reorders top 30 by editorial judgment
@@ -136,6 +137,7 @@ db/
 
 scripts/
   qa-summaries.sh            # QA runner
+  run-merge-stories.mjs      # One-time duplicate-story backfill merge (supports dry run)
   summary_quality_report.mjs # QA report logic
 ```
 
@@ -161,6 +163,6 @@ scripts/
 - Admin pages use "legacy" class names -- they work, low priority to update.
 
 ## Known Limits
-- Grouping is lexical (`story_key`) and can miscluster edge cases.
+- Grouping starts lexical (`story_key`) and then does a token-overlap merge pass; semantic edge cases still remain until embedding clustering lands.
 - Worker orchestration (`apps/worker`) is not yet the runtime execution path.
 - No fixture-based regression suite yet for clustering/summary/ranking.

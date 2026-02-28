@@ -279,13 +279,44 @@ const TOPIC_DEDUPE_STOPWORDS = new Set([
   "reports",
   "latest",
   "update",
-  "updates"
+  "updates",
+  "school",
+  "schools",
+  "district",
+  "districts",
+  "board",
+  "boards",
+  "education",
+  "educator",
+  "educators",
+  "teacher",
+  "teachers",
+  "student",
+  "students",
+  "public",
+  "official",
+  "officials",
+  "plan",
+  "plans",
+  "bill",
+  "bills",
+  "lawmakers",
+  "legislature",
+  "session",
+  "state",
+  "states"
 ]);
 
-const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.62;
-const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.78;
-const STORY_TOPIC_SOFT_PENALTY = 0.88;
-const STORY_TOPIC_STRONG_PENALTY = 0.72;
+const TOPIC_TOKEN_ALIASES: Record<string, string[]> = {
+  lausd: ["los", "angel", "unifi", "school", "district"],
+  la: ["los", "angel"],
+  supe: ["superintendent"]
+};
+
+const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.44;
+const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.62;
+const STORY_TOPIC_SOFT_PENALTY = 0.8;
+const STORY_TOPIC_STRONG_PENALTY = 0.62;
 
 type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
 type StoryTopicTokenCache = Map<string, string[]>;
@@ -320,11 +351,23 @@ function getStoryTopicTokens(story: StoryTopicCandidate, cache: StoryTopicTokenC
     return [];
   }
 
-  const tokens = title
-    .split(/\s+/)
-    .map((token) => normalizeTopicToken(token))
-    .filter((token) => (token.length >= 3 || /^\d{2,}$/.test(token)) && !TOPIC_DEDUPE_STOPWORDS.has(token));
-  const unique = Array.from(new Set(tokens)).slice(0, 14);
+  const expandedTokens: string[] = [];
+  for (const rawToken of title.split(/\s+/)) {
+    const token = normalizeTopicToken(rawToken);
+    if ((token.length >= 3 || /^\d{2,}$/.test(token)) && !TOPIC_DEDUPE_STOPWORDS.has(token)) {
+      expandedTokens.push(token);
+    }
+
+    const aliases = TOPIC_TOKEN_ALIASES[token] ?? [];
+    for (const alias of aliases) {
+      const aliasToken = normalizeTopicToken(alias);
+      if ((aliasToken.length >= 3 || /^\d{2,}$/.test(aliasToken)) && !TOPIC_DEDUPE_STOPWORDS.has(aliasToken)) {
+        expandedTokens.push(aliasToken);
+      }
+    }
+  }
+
+  const unique = Array.from(new Set(expandedTokens)).slice(0, 18);
   cache.set(story.id, unique);
   return unique;
 }
