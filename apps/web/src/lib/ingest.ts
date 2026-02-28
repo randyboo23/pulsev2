@@ -2,7 +2,7 @@ import Parser from "rss-parser";
 import { pool } from "./db";
 import { getDefaultFeeds } from "./feeds";
 import { TRUSTED_SITES, SOURCE_TIERS } from "@pulse/core";
-import { groupUngroupedArticles } from "./grouping";
+import { groupUngroupedArticles, mergeSimilarStories } from "./grouping";
 
 const parser = new Parser({
   timeout: 10000,
@@ -258,6 +258,7 @@ type IngestResult = {
   skipped: number;
   unresolvedGoogleSkipped: number;
   grouped: number;
+  mergedStories: number;
   parseFailures: number;
   qualityChecked: number;
   nonArticleBlocked: number;
@@ -2618,6 +2619,12 @@ export async function ingestFeeds(): Promise<IngestResult> {
 
   const qualityScan = await classifyRecentArticles(3000);
   const grouped = await groupUngroupedArticles();
+  const mergePass = await mergeSimilarStories({
+    lookbackDays: 4,
+    candidateLimit: 220,
+    maxMerges: 16,
+    similarityThreshold: 0.62
+  });
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
 
   return {
@@ -2628,6 +2635,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     skipped,
     unresolvedGoogleSkipped,
     grouped,
+    mergedStories: mergePass.merged,
     parseFailures,
     qualityChecked: qualityScan.qualityChecked,
     nonArticleBlocked,

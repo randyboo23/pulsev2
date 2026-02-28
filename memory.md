@@ -35,6 +35,8 @@ Last updated: 2026-02-28
 ## Current Ranking Policy
 - Deterministic ranking feeds into AI reranking pass (Sonnet).
 - Deterministic ranking now applies title-topic similarity penalties and a final diversity pass to reduce same-event repetition in top slots.
+- Topic diversity now uses alias-aware tokens (`LAUSD` -> `Los Angeles Unified...`) and broader generic-word stopwords so same-event variants are suppressed more reliably in top slots.
+- Ingest now runs a similar-story merge pass after lexical grouping to collapse near-duplicate clusters into one story with combined sources.
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -75,6 +77,7 @@ Last updated: 2026-02-28
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
 - Manual `/admin/stories` backfill is recovery-only, not daily workflow.
+- One-time duplicate-story cleanup is available via `scripts/run-merge-stories.mjs` (dry run supported).
 - Runtime path remains in `apps/web`; `apps/worker` is deferred.
 - `extractJson()` helper strips markdown fences and preamble from Claude API responses before JSON parsing.
 
@@ -103,3 +106,4 @@ Last updated: 2026-02-28
 - 2026-02-28: Added Firecrawl 402/429 backoff and free-HTML-first scrape-feed parsing to avoid ingest failures when Firecrawl credits are exhausted.
 - 2026-02-28: Replaced `rss-parser` `parseURL()` usage with HTTP fetch + `parseString()` to remove Node `url.parse()` deprecation warnings in ingest.
 - 2026-02-28: Added quality-priority Firecrawl routing for top summary candidates with hard daily throttling (`firecrawl_usage` events).
+- 2026-02-28: Added post-grouping similar-story merge in ingest plus a one-time merge backfill script; ran live backfill iterations and merged 71 duplicate stories total.

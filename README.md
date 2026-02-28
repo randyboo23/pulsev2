@@ -37,7 +37,7 @@ Techmeme for US K-12 education news.
 - Homepage preview dedupe suppresses near-duplicate blurb text across top stories.
 - Story previews are confidence-gated via `preview_type` and `preview_confidence`; fallback/synthetic output is stored for debugging but displayed as headline-only.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
-- Story grouping by title key.
+- Story grouping by title key, plus automatic similar-story merge pass during ingest.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Top-story ranking now applies title-topic diversity suppression to reduce multiple same-event clusters appearing together.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
@@ -98,6 +98,16 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `QA_BASE_URL` (default `http://localhost:3000`)
   - `QA_STORY_LIMIT` (default `20`)
   - `QA_SHOW_LIMIT` (default `10`)
+
+## One-Time Story Backfill Merge
+- Run from repo root to merge existing duplicate story clusters:
+  - `node --conditions react-server --import tsx/esm scripts/run-merge-stories.mjs`
+- Optional env controls:
+  - `MERGE_DRY_RUN=true` (preview only, no writes)
+  - `MERGE_LOOKBACK_DAYS` (default `45`)
+  - `MERGE_CANDIDATE_LIMIT` (default `500`)
+  - `MERGE_MAX` (default `250`)
+  - `MERGE_SIMILARITY` (default `0.6`)
 
 ## Autonomous Runtime (Expected Daily Operation)
 - Normal mode is fully automated:
