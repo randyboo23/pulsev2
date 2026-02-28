@@ -203,7 +203,7 @@ export default async function HomePage({
                       </a>
                     </h3>
                     <span className="wire-source">
-                      {article.source_name ?? "Unknown"} · {formatDate(article.published_at)}
+                      {article.source_name ?? "Unknown"}
                     </span>
                   </div>
                 ))
