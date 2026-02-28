@@ -313,13 +313,96 @@ const TOPIC_TOKEN_ALIASES: Record<string, string[]> = {
   supe: ["superintendent"]
 };
 
+const TOPIC_TOKEN_CANONICAL: Record<string, string> = {
+  sue: "lawsuit",
+  sues: "lawsuit",
+  sued: "lawsuit",
+  suing: "lawsuit",
+  lawsuit: "lawsuit",
+  lawsuits: "lawsuit",
+  filed: "lawsuit",
+  filing: "lawsuit",
+  challenge: "lawsuit",
+  challenges: "lawsuit",
+  challenged: "lawsuit",
+  challenging: "lawsuit",
+  close: "closure",
+  closes: "closure",
+  closed: "closure",
+  closing: "closure",
+  closure: "closure",
+  closures: "closure",
+  shutdown: "closure",
+  shutdowns: "closure",
+  shut: "closure",
+  shuts: "closure",
+  vote: "vote",
+  votes: "vote",
+  voted: "vote",
+  voting: "vote",
+  approve: "vote",
+  approves: "vote",
+  approved: "vote",
+  approval: "vote",
+  raid: "raid",
+  raids: "raid",
+  raided: "raid",
+  warrant: "raid",
+  warrants: "raid",
+  probe: "investigation",
+  probes: "investigation",
+  investigated: "investigation",
+  investigation: "investigation",
+  investigations: "investigation",
+  inquiry: "investigation",
+  inquiries: "investigation"
+};
+
+const EVENT_ACTION_TOKENS = new Set([
+  "lawsuit",
+  "closure",
+  "vote",
+  "raid",
+  "investigation",
+  "strike",
+  "ban",
+  "funding",
+  "budget",
+  "layoff",
+  "leave"
+]);
+
+const NOVELTY_HINTS = [
+  "new details",
+  "developing",
+  "latest",
+  "breaking",
+  "now",
+  "names acting",
+  "appoints",
+  "approved",
+  "passes",
+  "settlement",
+  "charged",
+  "indicted",
+  "resigns",
+  "steps down"
+];
+
 const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.44;
 const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.62;
 const STORY_TOPIC_SOFT_PENALTY = 0.8;
 const STORY_TOPIC_STRONG_PENALTY = 0.62;
+const STORY_EVENT_CLUSTER_THRESHOLD = 0.34;
+const TOP_EVENT_CLUSTER_LIMIT = 10;
 
 type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
 type StoryTopicTokenCache = Map<string, string[]>;
+type StoryTopicOverlapDetails = {
+  ratio: number;
+  sharedTokens: number;
+  sharedActionTokens: number;
+};
 
 function normalizeTopicToken(token: string) {
   let normalized = token.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -341,6 +424,17 @@ function normalizeTopicToken(token: string) {
   return normalized;
 }
 
+function canonicalizeTopicToken(token: string) {
+  const raw = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!raw) return "";
+
+  const direct = TOPIC_TOKEN_CANONICAL[raw];
+  if (direct) return direct;
+
+  const normalized = normalizeTopicToken(raw);
+  return TOPIC_TOKEN_CANONICAL[normalized] ?? normalized;
+}
+
 function getStoryTopicTokens(story: StoryTopicCandidate, cache: StoryTopicTokenCache) {
   const cached = cache.get(story.id);
   if (cached) return cached;
@@ -353,14 +447,14 @@ function getStoryTopicTokens(story: StoryTopicCandidate, cache: StoryTopicTokenC
 
   const expandedTokens: string[] = [];
   for (const rawToken of title.split(/\s+/)) {
-    const token = normalizeTopicToken(rawToken);
+    const token = canonicalizeTopicToken(rawToken);
     if ((token.length >= 3 || /^\d{2,}$/.test(token)) && !TOPIC_DEDUPE_STOPWORDS.has(token)) {
       expandedTokens.push(token);
     }
 
     const aliases = TOPIC_TOKEN_ALIASES[token] ?? [];
     for (const alias of aliases) {
-      const aliasToken = normalizeTopicToken(alias);
+      const aliasToken = canonicalizeTopicToken(alias);
       if ((aliasToken.length >= 3 || /^\d{2,}$/.test(aliasToken)) && !TOPIC_DEDUPE_STOPWORDS.has(aliasToken)) {
         expandedTokens.push(aliasToken);
       }
@@ -372,19 +466,33 @@ function getStoryTopicTokens(story: StoryTopicCandidate, cache: StoryTopicTokenC
   return unique;
 }
 
-function storyTopicOverlapRatio(a: StoryTopicCandidate, b: StoryTopicCandidate, cache: StoryTopicTokenCache) {
+function storyTopicOverlapDetails(a: StoryTopicCandidate, b: StoryTopicCandidate, cache: StoryTopicTokenCache): StoryTopicOverlapDetails {
   const tokensA = getStoryTopicTokens(a, cache);
   const tokensB = getStoryTopicTokens(b, cache);
-  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  if (tokensA.length === 0 || tokensB.length === 0) {
+    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0 };
+  }
 
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
-  let overlap = 0;
+  let sharedTokens = 0;
+  let sharedActionTokens = 0;
   for (const token of setA) {
-    if (setB.has(token)) overlap += 1;
+    if (setB.has(token)) {
+      sharedTokens += 1;
+      if (EVENT_ACTION_TOKENS.has(token)) sharedActionTokens += 1;
+    }
   }
 
-  return overlap / Math.max(1, Math.min(setA.size, setB.size));
+  return {
+    ratio: sharedTokens / Math.max(1, Math.min(setA.size, setB.size)),
+    sharedTokens,
+    sharedActionTokens
+  };
+}
+
+function storyTopicOverlapRatio(a: StoryTopicCandidate, b: StoryTopicCandidate, cache: StoryTopicTokenCache) {
+  return storyTopicOverlapDetails(a, b, cache).ratio;
 }
 
 function maxStoryTopicOverlap(story: StoryTopicCandidate, others: StoryTopicCandidate[], cache: StoryTopicTokenCache) {
@@ -394,6 +502,55 @@ function maxStoryTopicOverlap(story: StoryTopicCandidate, others: StoryTopicCand
     if (overlap > maxOverlap) maxOverlap = overlap;
   }
   return maxOverlap;
+}
+
+function isSameEventCluster(details: StoryTopicOverlapDetails) {
+  if (details.ratio >= STORY_TOPIC_SIMILARITY_THRESHOLD) return true;
+  return (
+    details.ratio >= STORY_EVENT_CLUSTER_THRESHOLD &&
+    details.sharedTokens >= 2 &&
+    details.sharedActionTokens >= 1
+  );
+}
+
+function hasStrongNoveltySignal(candidate: StoryRow, existing: StoryRow) {
+  const candidateTitle = String(candidate.editor_title ?? candidate.title ?? "").toLowerCase();
+  const noveltyHint = NOVELTY_HINTS.some((hint) => candidateTitle.includes(hint));
+
+  const candidateLatest = new Date(candidate.latest_at).getTime();
+  const existingLatest = new Date(existing.latest_at).getTime();
+  const newerByHours = (candidateLatest - existingLatest) / (1000 * 60 * 60);
+
+  const sourceDelta = Number(candidate.source_count) - Number(existing.source_count);
+  const recentDelta = Number(candidate.recent_count) - Number(existing.recent_count);
+  const scoreDelta = Number(candidate.score) - Number(existing.score);
+
+  if (newerByHours >= 8 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
+  if (noveltyHint && newerByHours >= 4) return true;
+  if (noveltyHint && scoreDelta >= 1.5 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
+
+  return false;
+}
+
+function findEventClusterConflict(story: StoryRow, selected: StoryRow[], cache: StoryTopicTokenCache) {
+  let strongest: { existing: StoryRow; details: StoryTopicOverlapDetails } | null = null;
+
+  for (const existing of selected) {
+    const details = storyTopicOverlapDetails(story, existing, cache);
+    if (!isSameEventCluster(details)) continue;
+    if (!strongest || details.ratio > strongest.details.ratio) {
+      strongest = { existing, details };
+    }
+  }
+
+  return strongest;
+}
+
+function passesTopEventClusterGuard(story: StoryRow, selected: StoryRow[], cache: StoryTopicTokenCache) {
+  if (selected.length >= TOP_EVENT_CLUSTER_LIMIT) return true;
+  const conflict = findEventClusterConflict(story, selected, cache);
+  if (!conflict) return true;
+  return hasStrongNoveltySignal(story, conflict.existing);
 }
 
 function applyTopicSimilarityPenalty(stories: StoryRow[]) {
@@ -444,6 +601,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
 
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
+    if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     const overlap = maxStoryTopicOverlap(story, selected, cache);
     if (overlap >= STORY_TOPIC_SIMILARITY_THRESHOLD) continue;
     selected.push(story);
@@ -453,6 +611,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
     if (selectedIds.has(story.id)) continue;
+    if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     selected.push(story);
     selectedIds.add(story.id);
   }

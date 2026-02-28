@@ -39,7 +39,7 @@ Techmeme for US K-12 education news.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Story grouping by title key, plus automatic similar-story merge pass during ingest.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
-- Top-story ranking now applies title-topic diversity suppression to reduce multiple same-event clusters appearing together.
+- Top-story ranking now applies title-topic diversity suppression, semantic event-action normalization, and a top-10 event-cluster cap (with novelty override) to reduce same-event repeats.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
 - Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
 - Hard-news gate now demotes low-newsworthiness feature clusters (single-source, low-urgency, non-policy) so instructional evergreen content does not float to top slots.
