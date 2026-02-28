@@ -250,6 +250,173 @@ const SUMMARY_DEDUPE_STOPWORDS = new Set([
   "when"
 ]);
 
+const TOPIC_DEDUPE_STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+  "that",
+  "into",
+  "over",
+  "under",
+  "after",
+  "before",
+  "about",
+  "amid",
+  "amidst",
+  "will",
+  "would",
+  "could",
+  "should",
+  "what",
+  "why",
+  "how",
+  "says",
+  "say",
+  "report",
+  "reports",
+  "latest",
+  "update",
+  "updates"
+]);
+
+const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.62;
+const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.78;
+const STORY_TOPIC_SOFT_PENALTY = 0.88;
+const STORY_TOPIC_STRONG_PENALTY = 0.72;
+
+type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
+type StoryTopicTokenCache = Map<string, string[]>;
+
+function normalizeTopicToken(token: string) {
+  let normalized = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!normalized) return "";
+  if (normalized.endsWith("ies") && normalized.length > 4) {
+    normalized = `${normalized.slice(0, -3)}y`;
+  } else if (normalized.endsWith("es") && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith("s") && normalized.length > 3) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  if (normalized.endsWith("ing") && normalized.length > 5) {
+    normalized = normalized.slice(0, -3);
+  } else if (normalized.endsWith("ed") && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  }
+
+  return normalized;
+}
+
+function getStoryTopicTokens(story: StoryTopicCandidate, cache: StoryTopicTokenCache) {
+  const cached = cache.get(story.id);
+  if (cached) return cached;
+
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  if (!title) {
+    cache.set(story.id, []);
+    return [];
+  }
+
+  const tokens = title
+    .split(/\s+/)
+    .map((token) => normalizeTopicToken(token))
+    .filter((token) => (token.length >= 3 || /^\d{2,}$/.test(token)) && !TOPIC_DEDUPE_STOPWORDS.has(token));
+  const unique = Array.from(new Set(tokens)).slice(0, 14);
+  cache.set(story.id, unique);
+  return unique;
+}
+
+function storyTopicOverlapRatio(a: StoryTopicCandidate, b: StoryTopicCandidate, cache: StoryTopicTokenCache) {
+  const tokensA = getStoryTopicTokens(a, cache);
+  const tokensB = getStoryTopicTokens(b, cache);
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let overlap = 0;
+  for (const token of setA) {
+    if (setB.has(token)) overlap += 1;
+  }
+
+  return overlap / Math.max(1, Math.min(setA.size, setB.size));
+}
+
+function maxStoryTopicOverlap(story: StoryTopicCandidate, others: StoryTopicCandidate[], cache: StoryTopicTokenCache) {
+  let maxOverlap = 0;
+  for (const candidate of others) {
+    const overlap = storyTopicOverlapRatio(story, candidate, cache);
+    if (overlap > maxOverlap) maxOverlap = overlap;
+  }
+  return maxOverlap;
+}
+
+function applyTopicSimilarityPenalty(stories: StoryRow[]) {
+  if (stories.length <= 1) return stories;
+
+  const cache: StoryTopicTokenCache = new Map();
+  const seen: StoryRow[] = [];
+
+  const adjusted = stories.map((story) => {
+    const overlap = maxStoryTopicOverlap(story, seen, cache);
+    seen.push(story);
+
+    if (story.status === "pinned" || overlap < STORY_TOPIC_SIMILARITY_THRESHOLD) {
+      return story;
+    }
+
+    const penalty = overlap >= STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD
+      ? STORY_TOPIC_STRONG_PENALTY
+      : STORY_TOPIC_SOFT_PENALTY;
+
+    return {
+      ...story,
+      score: Number((story.score * penalty).toFixed(2))
+    };
+  });
+
+  const pinned = adjusted.filter((story) => story.status === "pinned");
+  const rest = adjusted.filter((story) => story.status !== "pinned");
+  return [...pinned.sort((a, b) => b.score - a.score), ...rest.sort((a, b) => b.score - a.score)];
+}
+
+function selectDiverseTopStories(stories: StoryRow[], limit: number) {
+  const boundedLimit = Math.max(1, limit);
+  if (stories.length <= boundedLimit) return stories.slice(0, boundedLimit);
+
+  const selected: StoryRow[] = [];
+  const selectedIds = new Set<string>();
+  const cache: StoryTopicTokenCache = new Map();
+
+  const pinned = stories.filter((story) => story.status === "pinned").sort((a, b) => b.score - a.score);
+  for (const story of pinned) {
+    if (selected.length >= boundedLimit) break;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  const pool = stories.filter((story) => !selectedIds.has(story.id));
+
+  for (const story of pool) {
+    if (selected.length >= boundedLimit) break;
+    const overlap = maxStoryTopicOverlap(story, selected, cache);
+    if (overlap >= STORY_TOPIC_SIMILARITY_THRESHOLD) continue;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  for (const story of pool) {
+    if (selected.length >= boundedLimit) break;
+    if (selectedIds.has(story.id)) continue;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  return selected;
+}
+
 function summaryDedupTokens(summary: string) {
   return summary
     .toLowerCase()
@@ -397,6 +564,7 @@ Ranking criteria (in priority order):
 3. Audience relevance: affects superintendent/principal decisions > general interest
 4. Source authority: established reporters and outlets > blogs and personal sites
 5. Novelty: new developments > updates on ongoing stories > evergreen content
+6. Diversity: avoid multiple stories about the same event unless there is a clearly new development
 
 Stories:
 ${storyList}
@@ -405,7 +573,7 @@ Respond with ONLY valid JSON:
 {"order":[3,1,7,...],"demote":[15,22,...]}
 
 "order" = story numbers in recommended display order (most important first). Include at most ${limit} stories.
-"demote" = story numbers that should NOT appear on the homepage (irrelevant, personal blogs, commercial, or too niche).`;
+"demote" = story numbers that should NOT appear on the homepage (irrelevant, personal blogs, commercial, too niche, or duplicative same-event repeats).`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -664,10 +832,14 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
     ...rest.sort((a, b) => b.score - a.score)
   ];
 
-  // AI reranking pass (falls back to deterministic if unavailable)
-  const ranked = await aiRerank(deterministicRanked, limit);
+  const diversityWeighted = applyTopicSimilarityPenalty(deterministicRanked);
 
-  const leadAdjusted = chooseLeadStory([...ranked]);
+  // AI reranking pass (falls back to deterministic if unavailable)
+  const aiPoolLimit = Math.max(limit, 30);
+  const ranked = await aiRerank(diversityWeighted, aiPoolLimit);
+  const diversityFiltered = selectDiverseTopStories(ranked, limit);
+
+  const leadAdjusted = chooseLeadStory([...diversityFiltered]);
   return dedupeStorySummariesForDisplay(leadAdjusted);
 }
 

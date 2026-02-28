@@ -14,6 +14,8 @@ RSS Feeds + Google News Discovery
     |
     v
 ingest.ts -- fetch feeds, normalize URLs, resolve redirects
+    |          scrape feeds: free HTML link extraction first, Firecrawl fallback
+    |          Firecrawl 402/429 -> temporary backoff (ingest continues without it)
     |
     v
 Quality Gate (ingest.ts) -- classify: article / uncertain / non_article
@@ -28,6 +30,8 @@ Free HTML Scrape (freeArticleScrape) -- try fetch + readability first (free)
     |
     v
 Summary Adjudication -- compare candidates (existing / rss / scrape / llm / fallback)
+    |                    top-priority stories: Firecrawl-first within daily cap
+    |                    all others: free scrape first, Firecrawl fallback
     |                    AI adjudication if available, deterministic fallback
     |
     v
@@ -35,13 +39,15 @@ Grouping (grouping.ts) -- currently lexical title-key matching
     |                      PLANNED: embedding-based clustering (see docs/embedding-clustering-spec.md)
     |
     v
-Ranking (ranking.ts) -- deterministic scoring (impact, urgency, policy, novelty, relevance,
-    |                    source authority, recency, volume, diversity)
-    |                    penalties: evergreen, singleton, thin coverage, hard news gate
+Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, policy, novelty,
+    |                                relevance, source authority, recency, volume)
+    |                                penalties: evergreen, singleton, thin coverage, hard news gate,
+    |                                plus title-topic similarity penalty for same-event repeats
     |
     v
 AI Reranking (stories.ts) -- Sonnet reorders top 30 by editorial judgment
     |                         15-minute cache, graceful fallback to deterministic
+    |                         final topic-diversity filter before homepage render
     |
     v
 Homepage (page.tsx) -- getTopStories() serves ranked stories with preview contract

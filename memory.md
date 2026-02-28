@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-02-11
+Last updated: 2026-02-28
 
 ---
 
@@ -17,6 +17,10 @@ Last updated: 2026-02-11
 
 ## Current Summary Policy
 - Summary candidates pipeline: rss -> cache check -> free scrape -> Firecrawl -> llm -> fallback -> adjudication.
+- Top story summary refresh now uses Firecrawl-first for the highest-priority stories each run, then free scrape fallback.
+- Firecrawl usage is hard-capped daily (`FIRECRAWL_DAILY_BUDGET`, default 90) with event-based tracking in `admin_events`.
+- Scrape-type feed parsing now uses free HTML link extraction first; Firecrawl feed parsing is fallback only.
+- Firecrawl enters temporary backoff on 402/429 so ingest continues on free methods instead of repeated hard failures.
 - Free scrape (`freeArticleScrape()`) uses plain HTTP fetch + regex extraction (no API cost).
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
 - Fallback/synthetic text stored for debugging but not shown to users.
@@ -30,6 +34,7 @@ Last updated: 2026-02-11
 
 ## Current Ranking Policy
 - Deterministic ranking feeds into AI reranking pass (Sonnet).
+- Deterministic ranking now applies title-topic similarity penalties and a final diversity pass to reduce same-event repetition in top slots.
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -94,3 +99,7 @@ Last updated: 2026-02-11
 - 2026-02-06: Fixed headline normalization to apply title case to lowercase headlines.
 - 2026-02-06: Deprioritized Edutopia to lowest source tier.
 - 2026-02-11: Enabled RLS on all tables with permissive policies (server-side auth only, no browser client).
+- 2026-02-28: Added topic-similarity scoring penalties and final top-story diversity filtering to suppress same-event duplicate stories on homepage.
+- 2026-02-28: Added Firecrawl 402/429 backoff and free-HTML-first scrape-feed parsing to avoid ingest failures when Firecrawl credits are exhausted.
+- 2026-02-28: Replaced `rss-parser` `parseURL()` usage with HTTP fetch + `parseString()` to remove Node `url.parse()` deprecation warnings in ingest.
+- 2026-02-28: Added quality-priority Firecrawl routing for top summary candidates with hard daily throttling (`firecrawl_usage` events).

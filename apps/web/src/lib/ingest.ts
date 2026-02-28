@@ -12,6 +12,90 @@ const parser = new Parser({
 });
 
 let anthropicAvailable: boolean | null = null;
+let firecrawlBackoffUntil = 0;
+
+const FIRECRAWL_BACKOFF_MS = 15 * 60 * 1000;
+const FIRECRAWL_DAILY_BUDGET = Number(process.env.FIRECRAWL_DAILY_BUDGET ?? "90");
+const FIRECRAWL_PRIORITY_STORY_LIMIT = Number(process.env.FIRECRAWL_PRIORITY_STORY_LIMIT ?? "12");
+
+let lastFirecrawlBudgetWarningDay = "";
+
+function isFirecrawlBackoffActive() {
+  return firecrawlBackoffUntil > Date.now();
+}
+
+function canUseFirecrawl() {
+  return Boolean(process.env.FIRECRAWL_API_KEY) && !isFirecrawlBackoffActive();
+}
+
+function isFirecrawlQuotaLikeError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return (
+    /\bFirecrawl\s+(402|429)\b/i.test(error.message) ||
+    /\bfirecrawl_backoff_active\b/i.test(error.message) ||
+    /\bfirecrawl_daily_budget_exhausted\b/i.test(error.message)
+  );
+}
+
+async function getFirecrawlCallsUsedToday() {
+  const result = await pool.query(
+    `select coalesce(sum(coalesce((detail->>'calls')::int, 1)), 0)::int as calls
+     from admin_events
+     where event_type = 'firecrawl_usage'
+       and created_at >= date_trunc('day', now())`
+  );
+  return Number(result.rows[0]?.calls ?? 0);
+}
+
+async function hasFirecrawlBudgetRemaining() {
+  if (!Number.isFinite(FIRECRAWL_DAILY_BUDGET) || FIRECRAWL_DAILY_BUDGET <= 0) {
+    return false;
+  }
+
+  const usedToday = await getFirecrawlCallsUsedToday();
+  const remaining = FIRECRAWL_DAILY_BUDGET - usedToday;
+  if (remaining > 0) return true;
+
+  const dayKey = new Date().toISOString().slice(0, 10);
+  if (lastFirecrawlBudgetWarningDay !== dayKey) {
+    lastFirecrawlBudgetWarningDay = dayKey;
+    console.warn(
+      `[ingest] Firecrawl daily budget reached (${usedToday}/${FIRECRAWL_DAILY_BUDGET}); continuing with free scrape methods`
+    );
+  }
+  return false;
+}
+
+async function recordFirecrawlUsage() {
+  await pool.query(
+    `insert into admin_events (event_type, detail)
+     values ('firecrawl_usage', jsonb_build_object('calls', 1))`
+  );
+}
+
+async function parseFeedViaHttp(feedUrl: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(feedUrl, {
+      headers: {
+        "User-Agent": "PulseK12/1.0 (+https://pulsek12.com)",
+        Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1"
+      },
+      redirect: "follow",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Status code ${response.status}`);
+    }
+
+    const xml = await response.text();
+    return parser.parseString(xml);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /** Extract JSON from a response that may include markdown fences or preamble. */
 function extractJson(raw: string): string {
@@ -1137,11 +1221,7 @@ function extractFirstParagraph(html: string) {
   return sanitizeSummary(decodeEntities(stripTags(match[1])));
 }
 
-/**
- * Free scrape: plain HTTP fetch + regex extraction. No API credits used.
- * Returns extracted summary text, or empty string on failure.
- */
-async function freeArticleScrape(url: string): Promise<string> {
+async function fetchHtmlViaHttp(url: string, maxChars = 200_000): Promise<string> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
@@ -1156,11 +1236,25 @@ async function freeArticleScrape(url: string): Promise<string> {
     });
     clearTimeout(timeout);
     if (!response.ok) return "";
+
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.includes("text/html")) return "";
-    // Only read first 200KB to avoid huge pages
+
     const text = await response.text();
-    const html = text.slice(0, 200_000);
+    return text.slice(0, maxChars);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Free scrape: plain HTTP fetch + regex extraction. No API credits used.
+ * Returns extracted summary text, or empty string on failure.
+ */
+async function freeArticleScrape(url: string): Promise<string> {
+  try {
+    const html = await fetchHtmlViaHttp(url, 200_000);
+    if (!html) return "";
 
     // Try meta description first (og:description, twitter:description, etc.)
     const meta = extractMetaDescription(html);
@@ -1675,6 +1769,12 @@ async function fetchFirecrawlScrape(
   if (!apiKey) {
     throw new Error("FIRECRAWL_API_KEY is not set");
   }
+  if (isFirecrawlBackoffActive()) {
+    throw new Error("firecrawl_backoff_active");
+  }
+  if (!(await hasFirecrawlBudgetRemaining())) {
+    throw new Error("firecrawl_daily_budget_exhausted");
+  }
   const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
     method: "POST",
     headers: {
@@ -1684,12 +1784,16 @@ async function fetchFirecrawlScrape(
     body: JSON.stringify({ url, formats, ...options })
   });
   if (!response.ok) {
+    if (response.status === 402 || response.status === 429) {
+      firecrawlBackoffUntil = Date.now() + FIRECRAWL_BACKOFF_MS;
+    }
     throw new Error(`Firecrawl ${response.status}`);
   }
   const payload = await response.json();
   if (!payload?.success) {
     throw new Error(payload?.error ?? "Firecrawl failed");
   }
+  await recordFirecrawlUsage();
   return payload?.data ?? {};
 }
 
@@ -1703,14 +1807,36 @@ async function fetchFirecrawlHtml(url: string) {
 }
 
 async function parseScrapeFeed(url: string, domain: string) {
-  const html = await fetchFirecrawlHtml(url);
-  const links = extractLinksFromHtml(html, url, domain).slice(0, MAX_ITEMS_PER_FEED);
-  return {
-    items: links.map((link) => ({
-      title: link.title,
-      link: link.url
-    }))
-  };
+  const freeHtml = await fetchHtmlViaHttp(url, 300_000);
+  const freeLinks = freeHtml ? extractLinksFromHtml(freeHtml, url, domain).slice(0, MAX_ITEMS_PER_FEED) : [];
+  if (freeLinks.length > 0) {
+    return {
+      items: freeLinks.map((link) => ({
+        title: link.title,
+        link: link.url
+      }))
+    };
+  }
+
+  if (!canUseFirecrawl() || !(await hasFirecrawlBudgetRemaining())) {
+    return { items: [] };
+  }
+
+  try {
+    const html = await fetchFirecrawlHtml(url);
+    const links = extractLinksFromHtml(html, url, domain).slice(0, MAX_ITEMS_PER_FEED);
+    return {
+      items: links.map((link) => ({
+        title: link.title,
+        link: link.url
+      }))
+    };
+  } catch (error) {
+    if (isFirecrawlQuotaLikeError(error)) {
+      return { items: [] };
+    }
+    throw error;
+  }
 }
 
 export async function fillStorySummaries(
@@ -1774,8 +1900,9 @@ export async function fillStorySummaries(
   let aiRemaining = aiLimit === 0 ? Number.POSITIVE_INFINITY : aiLimit;
   const fetchLimit = Math.min(limit, 20);
   const canUseAI = allowAI && Boolean(process.env.ANTHROPIC_API_KEY);
+  const priorityStoryLimit = Math.max(0, Math.min(fetchLimit, FIRECRAWL_PRIORITY_STORY_LIMIT));
 
-  for (const row of result.rows) {
+  for (const [rowIndex, row] of result.rows.entries()) {
     const summaryTitle = (row.article_title as string | null) ?? (row.story_title as string) ?? "";
     const candidates: SummaryCandidate[] = [];
     addSummaryCandidate(candidates, "existing", row.summary as string | null, summaryTitle);
@@ -1785,21 +1912,51 @@ export async function fillStorySummaries(
       existingSummary.trim().length < 40 ||
       candidates.length === 0 ||
       candidates.every((c) => c.score < 0.45);
-    // Try free HTTP scrape first (no API credits)
+    const isPriorityStory = rowIndex < priorityStoryLimit;
+    let triedFirecrawl = false;
+
+    // Quality-first for top stories: try Firecrawl before free scrape (within budget/caps).
     if (summaryIsMissingOrGarbage) {
-      try {
-        const freeText = await freeArticleScrape(row.url as string);
-        addSummaryCandidate(candidates, "scrape", freeText, summaryTitle);
-      } catch {
-        // Free scrape failed silently — will try Firecrawl next
+      if (isPriorityStory && fetched < fetchLimit && canUseFirecrawl()) {
+        triedFirecrawl = true;
+        try {
+          const scraped = await fetchArticleSummary(row.url as string);
+          const added = addSummaryCandidate(candidates, "scrape", scraped, summaryTitle);
+          if (added) {
+            fetched += 1;
+          }
+        } catch (error) {
+          if (!isFirecrawlQuotaLikeError(error)) {
+            console.error(
+              `[ingest] failed to enrich priority story summary ${row.url}: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+      }
+
+      // Free HTTP scrape fallback (no API credits)
+      const stillNeedsFreeScrape = candidates.every((c) => c.score < 0.45);
+      if (stillNeedsFreeScrape) {
+        try {
+          const freeText = await freeArticleScrape(row.url as string);
+          addSummaryCandidate(candidates, "scrape", freeText, summaryTitle);
+        } catch {
+          // Free scrape failed silently — will try Firecrawl fallback next
+        }
       }
     }
 
-    // Only use Firecrawl if free scrape didn't produce a good result
+    // Non-priority fallback: only use Firecrawl if free scrape still didn't produce a good result.
     const stillMissing =
       summaryIsMissingOrGarbage &&
       candidates.every((c) => c.score < 0.45);
-    if (stillMissing && fetched < fetchLimit) {
+    if (
+      stillMissing &&
+      !triedFirecrawl &&
+      fetched < fetchLimit &&
+      canUseFirecrawl() &&
+      (await hasFirecrawlBudgetRemaining())
+    ) {
       try {
         const scraped = await fetchArticleSummary(row.url as string);
         const added = addSummaryCandidate(candidates, "scrape", scraped, summaryTitle);
@@ -1807,9 +1964,11 @@ export async function fillStorySummaries(
           fetched += 1;
         }
       } catch (error) {
-        console.error(
-          `[ingest] failed to enrich story summary ${row.url}: ${error instanceof Error ? error.message : String(error)}`
-        );
+        if (!isFirecrawlQuotaLikeError(error)) {
+          console.error(
+            `[ingest] failed to enrich story summary ${row.url}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
       }
     }
 
@@ -1830,7 +1989,7 @@ export async function fillStorySummaries(
       try {
         // Try free scrape for LLM context before using Firecrawl
         let markdown = await freeArticleScrape(row.url as string);
-        if (markdown.length < 200) {
+        if (markdown.length < 200 && canUseFirecrawl() && (await hasFirecrawlBudgetRemaining())) {
           markdown = await fetchArticleMarkdown(row.url as string);
         }
         const llm = await generateAnthropicSummary(
@@ -1844,9 +2003,11 @@ export async function fillStorySummaries(
           }
         }
       } catch (error) {
-        console.error(
-          `[ingest] failed to generate summary ${row.url}: ${error instanceof Error ? error.message : String(error)}`
-        );
+        if (!isFirecrawlQuotaLikeError(error)) {
+          console.error(
+            `[ingest] failed to generate summary ${row.url}: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
       }
     }
 
@@ -2164,7 +2325,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
       if (feed.feedType === "scrape") {
         parsed = await parseScrapeFeed(feed.url, feed.domain);
       } else {
-        parsed = await parser.parseURL(feed.url);
+        parsed = await parseFeedViaHttp(feed.url);
       }
       if (feed.id) {
         await pool.query(
@@ -2295,7 +2456,8 @@ export async function ingestFeeds(): Promise<IngestResult> {
         summaryCandidates.every((c) => !c.text || c.text.trim().length < 40 || c.score < 0.45);
       const shouldTryFirecrawl =
         stillNeedsScrape &&
-        Boolean(process.env.FIRECRAWL_API_KEY) &&
+        canUseFirecrawl() &&
+        (await hasFirecrawlBudgetRemaining()) &&
         scrapeSummaries < scrapeSummaryLimit;
       if (shouldTryFirecrawl) {
         try {
@@ -2305,9 +2467,11 @@ export async function ingestFeeds(): Promise<IngestResult> {
             scrapeSummaries += 1;
           }
         } catch (error) {
-          console.error(
-            `[ingest] failed to fetch article summary ${normalizedUrl}: ${error instanceof Error ? error.message : String(error)}`
-          );
+          if (!isFirecrawlQuotaLikeError(error)) {
+            console.error(
+              `[ingest] failed to fetch article summary ${normalizedUrl}: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
         }
       }
       if (summaryCandidates.length === 0) {

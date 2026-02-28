@@ -39,6 +39,7 @@ Techmeme for US K-12 education news.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Story grouping by title key.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
+- Top-story ranking now applies title-topic diversity suppression to reduce multiple same-event clusters appearing together.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
 - Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
 - Hard-news gate now demotes low-newsworthiness feature clusters (single-source, low-urgency, non-policy) so instructional evergreen content does not float to top slots.
@@ -64,10 +65,11 @@ Techmeme for US K-12 education news.
 1. Set `DATABASE_URL` and `INGEST_SECRET` in `.env`.
 2. Optional for AI adjudication/generation: set `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_MODEL`).
 3. Optional for scrape candidate summaries: set `FIRECRAWL_API_KEY`.
-4. Optional for scheduled GET calls: set `CRON_SECRET`.
-5. Optional for newsletter subscribe: set `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID`.
-5. Run SQL from `db/schema.sql`.
-6. POST to `/api/ingest` with header `x-ingest-secret`.
+4. Optional Firecrawl controls: `FIRECRAWL_DAILY_BUDGET` (default `90`), `FIRECRAWL_PRIORITY_STORY_LIMIT` (default `12`).
+5. Optional for scheduled GET calls: set `CRON_SECRET`.
+6. Optional for newsletter subscribe: set `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID`.
+7. Run SQL from `db/schema.sql`.
+8. POST to `/api/ingest` with header `x-ingest-secret`.
 
 ## Automation (Recommended)
 - Use a scheduler to hit `/api/ingest` every 30 minutes.
@@ -111,10 +113,12 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Best quality path:
   - `ANTHROPIC_API_KEY` set and valid.
   - optional `FIRECRAWL_API_KEY` set for stronger scrape candidates.
+  - Firecrawl is prioritized for top summary candidates each run (bounded by daily budget).
   - AI adjudication + optional LLM rewrite chooses better, more distinct briefs.
 - Fallback path (still functional, lower quality):
   - if Anthropic is unavailable (for example `404 across candidate models`), pipeline falls back to deterministic templates.
   - this can make multiple briefs sound similar even when titles differ.
+  - if Firecrawl returns `402/429`, ingest applies temporary backoff and continues with free HTML extraction paths.
 - If briefs become repetitive, check:
   - Anthropic model/key validity.
   - whether logs show repeated Anthropic `404`/auth failures.

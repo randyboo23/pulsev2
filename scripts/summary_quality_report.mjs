@@ -129,6 +129,43 @@ const SUMMARY_DEDUPE_STOPWORDS = new Set([
   "when"
 ]);
 
+const TOPIC_DEDUPE_STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+  "that",
+  "into",
+  "over",
+  "under",
+  "after",
+  "before",
+  "about",
+  "amid",
+  "amidst",
+  "will",
+  "would",
+  "could",
+  "should",
+  "what",
+  "why",
+  "how",
+  "says",
+  "say",
+  "report",
+  "reports",
+  "latest",
+  "update",
+  "updates"
+]);
+
+const STORY_TOPIC_SIMILARITY_THRESHOLD = 0.62;
+const STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD = 0.78;
+const STORY_TOPIC_SOFT_PENALTY = 0.88;
+const STORY_TOPIC_STRONG_PENALTY = 0.72;
+
 function clamp(value, min, max) {
   if (value < min) return min;
   if (value > max) return max;
@@ -449,6 +486,134 @@ function dedupeStorySummariesForDisplay(stories) {
   });
 }
 
+function normalizeTopicToken(token) {
+  let normalized = token.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!normalized) return "";
+  if (normalized.endsWith("ies") && normalized.length > 4) {
+    normalized = `${normalized.slice(0, -3)}y`;
+  } else if (normalized.endsWith("es") && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith("s") && normalized.length > 3) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  if (normalized.endsWith("ing") && normalized.length > 5) {
+    normalized = normalized.slice(0, -3);
+  } else if (normalized.endsWith("ed") && normalized.length > 4) {
+    normalized = normalized.slice(0, -2);
+  }
+
+  return normalized;
+}
+
+function getStoryTopicTokens(story, cache) {
+  const key = String(story.id ?? "");
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  if (!title) {
+    cache.set(key, []);
+    return [];
+  }
+
+  const tokens = title
+    .split(/\s+/)
+    .map((token) => normalizeTopicToken(token))
+    .filter((token) => (token.length >= 3 || /^\d{2,}$/.test(token)) && !TOPIC_DEDUPE_STOPWORDS.has(token));
+  const unique = [...new Set(tokens)].slice(0, 14);
+  cache.set(key, unique);
+  return unique;
+}
+
+function storyTopicOverlapRatio(a, b, cache) {
+  const tokensA = getStoryTopicTokens(a, cache);
+  const tokensB = getStoryTopicTokens(b, cache);
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let overlap = 0;
+  for (const token of setA) {
+    if (setB.has(token)) overlap += 1;
+  }
+
+  return overlap / Math.max(1, Math.min(setA.size, setB.size));
+}
+
+function maxStoryTopicOverlap(story, others, cache) {
+  let maxOverlap = 0;
+  for (const candidate of others) {
+    const overlap = storyTopicOverlapRatio(story, candidate, cache);
+    if (overlap > maxOverlap) maxOverlap = overlap;
+  }
+  return maxOverlap;
+}
+
+function applyTopicSimilarityPenalty(stories) {
+  if (stories.length <= 1) return stories;
+
+  const cache = new Map();
+  const seen = [];
+
+  const adjusted = stories.map((story) => {
+    const overlap = maxStoryTopicOverlap(story, seen, cache);
+    seen.push(story);
+
+    if (story.status === "pinned" || overlap < STORY_TOPIC_SIMILARITY_THRESHOLD) {
+      return story;
+    }
+
+    const penalty = overlap >= STORY_TOPIC_STRONG_SIMILARITY_THRESHOLD
+      ? STORY_TOPIC_STRONG_PENALTY
+      : STORY_TOPIC_SOFT_PENALTY;
+
+    return {
+      ...story,
+      score: Number((story.score * penalty).toFixed(2))
+    };
+  });
+
+  const pinned = adjusted.filter((story) => story.status === "pinned");
+  const rest = adjusted.filter((story) => story.status !== "pinned");
+  return [...pinned.sort((a, b) => b.score - a.score), ...rest.sort((a, b) => b.score - a.score)];
+}
+
+function selectDiverseTopStories(stories, limit) {
+  const boundedLimit = Math.max(1, limit);
+  if (stories.length <= boundedLimit) return stories.slice(0, boundedLimit);
+
+  const selected = [];
+  const selectedIds = new Set();
+  const cache = new Map();
+
+  const pinned = stories.filter((story) => story.status === "pinned").sort((a, b) => b.score - a.score);
+  for (const story of pinned) {
+    if (selected.length >= boundedLimit) break;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  const pool = stories.filter((story) => !selectedIds.has(story.id));
+
+  for (const story of pool) {
+    if (selected.length >= boundedLimit) break;
+    const overlap = maxStoryTopicOverlap(story, selected, cache);
+    if (overlap >= STORY_TOPIC_SIMILARITY_THRESHOLD) continue;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  for (const story of pool) {
+    if (selected.length >= boundedLimit) break;
+    if (selectedIds.has(story.id)) continue;
+    selected.push(story);
+    selectedIds.add(story.id);
+  }
+
+  return selected;
+}
+
 function summaryOpening(summary) {
   return summary
     .toLowerCase()
@@ -578,10 +743,12 @@ async function run() {
 
     const pinned = scored.filter((story) => story.status === "pinned");
     const rest = scored.filter((story) => story.status !== "pinned");
-    const ranked = [
+    const deterministicRanked = [
       ...pinned.sort((a, b) => b.score - a.score),
       ...rest.sort((a, b) => b.score - a.score)
-    ].slice(0, TOP_LIMIT);
+    ];
+    const diversityWeighted = applyTopicSimilarityPenalty(deterministicRanked);
+    const ranked = selectDiverseTopStories(diversityWeighted, TOP_LIMIT);
     const leadAdjusted = chooseLeadStory([...ranked]);
 
     const displayRows = dedupeStorySummariesForDisplay(leadAdjusted);
@@ -598,6 +765,16 @@ async function run() {
     for (let i = 0; i < summaries.length; i += 1) {
       for (let j = i + 1; j < summaries.length; j += 1) {
         if (summariesAreNearDuplicate(summaries[i], summaries[j])) duplicatePairs += 1;
+      }
+    }
+
+    let topicalDuplicatePairs = 0;
+    const topicCache = new Map();
+    for (let i = 0; i < displayRows.length; i += 1) {
+      for (let j = i + 1; j < displayRows.length; j += 1) {
+        if (storyTopicOverlapRatio(displayRows[i], displayRows[j], topicCache) >= STORY_TOPIC_SIMILARITY_THRESHOLD) {
+          topicalDuplicatePairs += 1;
+        }
       }
     }
 
@@ -625,6 +802,7 @@ async function run() {
     console.log(`- Blank previews after filters/dedupe: ${blankShown}`);
     console.log(`- Synthetic fallback previews shown: ${syntheticShown}`);
     console.log(`- Near-duplicate preview pairs: ${duplicatePairs}`);
+    console.log(`- Topical near-duplicate title pairs: ${topicalDuplicatePairs}`);
     console.log(`- Preview types: ${Object.entries(previewTypeCounts).map(([k, v]) => `${k}:${v}`).join(", ")}`);
 
     if (repeatedOpenings.length > 0) {
