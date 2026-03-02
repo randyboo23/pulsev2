@@ -123,11 +123,43 @@ const TRAILING_BOILERPLATE_PATTERNS = [
 ];
 
 const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
+const HOMEPAGE_RANK_COLUMN_CHECK_TTL_MS = 60_000;
+
+let homepageRankColumnsAvailable: boolean | null = null;
+let homepageRankColumnsCheckedAt = 0;
+let homepageRankMissingWarningLogged = false;
 
 function clamp(value: number, min: number, max: number) {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+async function hasHomepageRankColumns() {
+  const now = Date.now();
+  if (
+    homepageRankColumnsAvailable !== null &&
+    now - homepageRankColumnsCheckedAt < HOMEPAGE_RANK_COLUMN_CHECK_TTL_MS
+  ) {
+    return homepageRankColumnsAvailable;
+  }
+
+  try {
+    const result = await pool.query(
+      `select count(*)::int as count
+       from information_schema.columns
+       where table_schema = current_schema()
+         and table_name = 'stories'
+         and column_name in ('homepage_rank', 'homepage_ranked_at')`
+    );
+    const count = Number(result.rows[0]?.count ?? 0);
+    homepageRankColumnsAvailable = count >= 2;
+  } catch {
+    homepageRankColumnsAvailable = false;
+  }
+
+  homepageRankColumnsCheckedAt = now;
+  return homepageRankColumnsAvailable;
 }
 
 function normalizeSummary(summary: string | null | undefined) {
@@ -197,12 +229,23 @@ export type StoryRow = {
   avg_weight: number;
   latest_at: string;
   score: number;
+  homepage_rank?: number | null;
+  homepage_ranked_at?: string | null;
   story_type?: StoryType;
   lead_eligible?: boolean;
   lead_reason?: string | null;
   lead_urgency_override?: boolean;
   score_breakdown?: string;
   matches_audience?: boolean;
+};
+
+type TopStoriesOptions = {
+  useAiRerank?: boolean;
+  useStoredRank?: boolean;
+};
+
+export type RefreshHomepageRanksResult = {
+  ranked: number;
 };
 
 export type StoryDetailRow = {
@@ -692,6 +735,28 @@ function chooseLeadStory(stories: StoryRow[]) {
   return stories;
 }
 
+function hasStoredHomepageRank(stories: StoryRow[]) {
+  return stories.some((story) => Number.isFinite(story.homepage_rank ?? NaN));
+}
+
+function orderStoriesByStoredRank(stories: StoryRow[]) {
+  const withRank = stories
+    .filter((story) => Number.isFinite(story.homepage_rank ?? NaN))
+    .sort((a, b) => Number(a.homepage_rank) - Number(b.homepage_rank));
+  const withoutRank = stories.filter((story) => !Number.isFinite(story.homepage_rank ?? NaN));
+
+  const rankedPinned = withRank.filter((story) => story.status === "pinned");
+  const rankedRest = withRank.filter((story) => story.status !== "pinned");
+  const fallbackPinned = withoutRank
+    .filter((story) => story.status === "pinned")
+    .sort((a, b) => b.score - a.score);
+  const fallbackRest = withoutRank
+    .filter((story) => story.status !== "pinned")
+    .sort((a, b) => b.score - a.score);
+
+  return [...rankedPinned, ...fallbackPinned, ...rankedRest, ...fallbackRest];
+}
+
 /** Extract JSON from a response that may include markdown fences or preamble. */
 function extractJson(raw: string): string {
   // Strip markdown code fences: ```json ... ``` or ``` ... ```
@@ -849,7 +914,18 @@ Respond with ONLY valid JSON:
   }
 }
 
-export async function getTopStories(limit = 20, audience?: Audience): Promise<StoryRow[]> {
+export async function getTopStories(
+  limit = 20,
+  audience?: Audience,
+  options: TopStoriesOptions = {}
+): Promise<StoryRow[]> {
+  const useAiRerank = options.useAiRerank ?? false;
+  const useStoredRank = options.useStoredRank ?? true;
+  const rankColumnsAvailable = await hasHomepageRankColumns();
+  const homepageRankSelect = rankColumnsAvailable
+    ? "s.homepage_rank, s.homepage_ranked_at,"
+    : "null::integer as homepage_rank, null::timestamptz as homepage_ranked_at,";
+
   const result = await pool.query(
     `select
       s.id,
@@ -861,6 +937,7 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
       s.preview_reason,
       s.editor_title,
       s.editor_summary,
+      ${homepageRankSelect}
       s.status,
       s.first_seen_at,
       s.last_seen_at,
@@ -948,6 +1025,12 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
       const previewConfidence = Number(
         clamp(Number.isFinite(previewConfidenceRaw) ? previewConfidenceRaw : 0, 0, 1).toFixed(2)
       );
+      const homepageRankRaw = row.homepage_rank as number | string | null | undefined;
+      const homepageRank = homepageRankRaw == null ? null : Number(homepageRankRaw);
+      const normalizedHomepageRank =
+        Number.isFinite(homepageRank) && Number(homepageRank) > 0
+          ? Number(homepageRank)
+          : null;
 
       const hasStructuredPreview =
         previewTypeValue === "full" || previewTypeValue === "excerpt" || previewTypeValue === "headline_only";
@@ -1012,6 +1095,8 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
         recent_count: Number(row.recent_count),
         avg_weight: Number(row.avg_weight),
         score,
+        homepage_rank: normalizedHomepageRank,
+        homepage_ranked_at: (row.homepage_ranked_at as string | null | undefined) ?? null,
         story_type: ranking.storyType,
         lead_eligible: ranking.leadEligible,
         lead_reason: ranking.leadReason,
@@ -1024,6 +1109,11 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
   const finalSet = filtered.length > 0 ? filtered : scored;
 
+  if (useStoredRank && hasStoredHomepageRank(finalSet)) {
+    const ordered = orderStoriesByStoredRank(finalSet).slice(0, limit);
+    return dedupeStorySummariesForDisplay(ordered);
+  }
+
   const pinned = finalSet.filter((story) => story.status === "pinned");
   const rest = finalSet.filter((story) => story.status !== "pinned");
 
@@ -1034,13 +1124,59 @@ export async function getTopStories(limit = 20, audience?: Audience): Promise<St
 
   const diversityWeighted = applyTopicSimilarityPenalty(deterministicRanked);
 
-  // AI reranking pass (falls back to deterministic if unavailable)
   const aiPoolLimit = Math.max(limit, 30);
-  const ranked = await aiRerank(diversityWeighted, aiPoolLimit);
+  const shouldUseAiRerank = useAiRerank || useStoredRank;
+  const ranked = shouldUseAiRerank
+    ? await aiRerank(diversityWeighted, aiPoolLimit)
+    : diversityWeighted.slice(0, aiPoolLimit);
   const diversityFiltered = selectDiverseTopStories(ranked, limit);
 
   const leadAdjusted = chooseLeadStory([...diversityFiltered]);
   return dedupeStorySummariesForDisplay(leadAdjusted);
+}
+
+export async function refreshHomepageRanks(limit = 60): Promise<RefreshHomepageRanksResult> {
+  const rankColumnsAvailable = await hasHomepageRankColumns();
+  if (!rankColumnsAvailable) {
+    if (!homepageRankMissingWarningLogged) {
+      homepageRankMissingWarningLogged = true;
+      console.warn(
+        "[stories] homepage rank columns are missing; run db/schema.sql to enable persisted ranking"
+      );
+    }
+    return { ranked: 0 };
+  }
+
+  const boundedLimit = Math.min(Math.max(limit, 20), 120);
+  const rankedStories = await getTopStories(boundedLimit, undefined, {
+    useAiRerank: true,
+    useStoredRank: false
+  });
+
+  const rankedIds = rankedStories.map((story) => story.id);
+  const ranks = rankedIds.map((_, index) => index + 1);
+
+  await pool.query(
+    `with cleared as (
+       update stories
+       set homepage_rank = null,
+           homepage_ranked_at = null
+       where homepage_rank is not null
+          or homepage_ranked_at is not null
+     ),
+     ranked as (
+       select *
+       from unnest($1::uuid[], $2::int[]) as t(id, rank)
+     )
+     update stories s
+     set homepage_rank = ranked.rank,
+         homepage_ranked_at = now()
+     from ranked
+     where s.id = ranked.id`,
+    [rankedIds, ranks]
+  );
+
+  return { ranked: rankedIds.length };
 }
 
 export async function getStoryById(id: string): Promise<StoryByIdResult | null> {

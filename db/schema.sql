@@ -114,6 +114,8 @@ create table if not exists stories (
   preview_reason text,
   editor_title text,
   editor_summary text,
+  homepage_rank integer,
+  homepage_ranked_at timestamptz,
   status text not null default 'active',
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
@@ -133,10 +135,17 @@ alter table if exists stories
 alter table if exists stories
   add column if not exists preview_reason text;
 
+alter table if exists stories
+  add column if not exists homepage_rank integer;
+
+alter table if exists stories
+  add column if not exists homepage_ranked_at timestamptz;
+
 create index if not exists idx_stories_story_key on stories(story_key);
 create index if not exists idx_stories_story_key_last_seen on stories(story_key, last_seen_at desc);
 create index if not exists idx_stories_last_seen_at on stories(last_seen_at desc);
 create index if not exists idx_stories_status on stories(status);
+create index if not exists idx_stories_homepage_rank on stories(homepage_rank) where homepage_rank is not null;
 
 create table if not exists story_articles (
   story_id uuid not null references stories(id) on delete cascade,

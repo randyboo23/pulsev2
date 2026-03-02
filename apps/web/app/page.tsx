@@ -49,8 +49,10 @@ export default async function HomePage({
       ? searchParams.audience
       : undefined;
 
-  const stories = await getTopStories(18, audience);
-  const articles = await getRecentArticles(12);
+  const [stories, articles] = await Promise.all([
+    getTopStories(18, audience),
+    getRecentArticles(12)
+  ]);
 
   const featuredStory = stories[0];
   const remainingStories = stories.slice(1);

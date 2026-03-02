@@ -31,7 +31,7 @@ export function NewsletterForm({
 
       if (res.ok) {
         setStatus("success");
-        setMessage("You're in! Check your email to confirm.");
+        setMessage("You're in! Pulse K-12 hits your inbox every Sunday.");
         setEmail("");
       } else {
         setStatus("error");

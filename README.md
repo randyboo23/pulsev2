@@ -37,6 +37,7 @@ Techmeme for US K-12 education news.
 - Homepage preview dedupe suppresses near-duplicate blurb text across top stories.
 - Story previews are confidence-gated via `preview_type` and `preview_confidence`; fallback/synthetic output is stored for debugging but displayed as headline-only.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
+- Automatic homepage-rank refresh on ingest (`refreshHomepageRanks`) so homepage order is precomputed in DB.
 - Story grouping by title key, plus automatic similar-story merge pass during ingest.
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Top-story ranking now applies title-topic diversity suppression, semantic event-action normalization, and a top-20 event-cluster cap (with strict novelty override) to reduce same-event repeats.
@@ -112,7 +113,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 ## Autonomous Runtime (Expected Daily Operation)
 - Normal mode is fully automated:
   - scheduler calls `/api/ingest` every 30 minutes.
-  - ingest fetches feeds, filters low-quality/non-article links, groups stories, and refreshes story briefs.
+  - ingest fetches feeds, filters low-quality/non-article links, groups stories, refreshes story briefs, and persists homepage rank order.
   - homepage reflects newest grouped stories and briefs without manual admin clicks.
 - Manual `Backfill story briefs (manual)` is for recovery:
   - after schema/prompt changes,

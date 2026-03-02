@@ -4,7 +4,7 @@
 - Single runtime today: `apps/web` (Next.js app + API routes + ingest logic).
 - Persistent store: Postgres (Supabase).
 - Optional external services:
-  - Anthropic: summary adjudication, AI reranking, relevance gating, and bounded LLM rewrite.
+  - Anthropic: summary adjudication, ingest-time AI reranking, relevance gating, and bounded LLM rewrite.
   - Firecrawl: full-text extraction when free scrape and RSS summaries are weak.
 - Scheduler: GitHub Actions (`.github/workflows/ingest-cron.yml`) calls `GET /api/ingest`.
 
@@ -47,12 +47,12 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
     |                                final top-20 event-cluster cap keeps one story per event unless novelty signal is strong
     |
     v
-AI Reranking (stories.ts) -- Sonnet reorders top 30 by editorial judgment
-    |                         15-minute cache, graceful fallback to deterministic
-    |                         final topic-diversity filter before homepage render
+AI Reranking (ingest.ts -> stories.ts) -- Sonnet reorders top stories by editorial judgment
+    |                                  order persisted to `stories.homepage_rank` each ingest run
+    |                                  graceful fallback to deterministic if Anthropic unavailable
     |
     v
-Homepage (page.tsx) -- getTopStories() serves ranked stories with preview contract
+Homepage (page.tsx) -- getTopStories() reads precomputed rank from DB (fallback compute if rank missing)
                        Latest Wire sidebar via getRecentArticles()
 ```
 
@@ -117,7 +117,7 @@ apps/web/
     ingest.ts                # Ingestion pipeline + free scrape + Firecrawl
     articles.ts              # Article queries + quality classification
     ranking.ts               # Deterministic scoring logic
-    stories.ts               # Story queries + AI reranking + summary fill
+    stories.ts               # Story queries + ranking logic + homepage-rank persistence
     grouping.ts              # Story clustering (currently lexical)
     feeds.ts                 # Feed registry + discovery queries
     sources.ts               # Source tiers (moved to packages/core)
@@ -146,12 +146,12 @@ scripts/
 - `sources`: domain, tier, weight.
 - `feeds`: source link, type (`rss` or `scrape`), health fields.
 - `articles`: canonical URL, content fields, quality fields, summary-choice diagnostics, relevance scoring.
-- `stories`: cluster-level headline/summary + preview contract + status.
+- `stories`: cluster-level headline/summary + preview contract + status + precomputed homepage order (`homepage_rank`, `homepage_ranked_at`).
 - `story_articles`: many-to-many article linkage and primary flag.
 - `admin_events`: admin action trail.
 
 ## Read/Render Contracts
-- Homepage uses `getTopStories()`: ranked stories with filtered preview text and lead metadata.
+- Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text and lead metadata.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).

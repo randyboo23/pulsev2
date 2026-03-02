@@ -3,6 +3,7 @@ import { pool } from "./db";
 import { getDefaultFeeds } from "./feeds";
 import { TRUSTED_SITES, SOURCE_TIERS } from "@pulse/core";
 import { groupUngroupedArticles, mergeSimilarStories } from "./grouping";
+import { refreshHomepageRanks } from "./stories";
 
 const parser = new Parser({
   timeout: 10000,
@@ -268,6 +269,7 @@ type IngestResult = {
   summaryAdjudicatedDeterministic: number;
   summaryGeneratedLLM: number;
   summaryRejected: number;
+  homepageRanked: number;
   relevanceChecked: number;
   relevanceRejected: number;
 };
@@ -2631,6 +2633,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     if (mergePass.merged === 0) break;
   }
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
+  const rankRefresh = await refreshHomepageRanks(60);
 
   return {
     feeds: feeds.length,
@@ -2650,6 +2653,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     summaryAdjudicatedDeterministic: summaryFill.adjudicatedDeterministic,
     summaryGeneratedLLM: summaryFill.llmGenerated,
     summaryRejected: summaryFill.rejected,
+    homepageRanked: rankRefresh.ranked,
     relevanceChecked,
     relevanceRejected
   };

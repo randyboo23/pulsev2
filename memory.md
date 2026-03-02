@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-02-28
+Last updated: 2026-03-02
 
 ---
 
@@ -47,7 +47,7 @@ Last updated: 2026-02-28
   - `evergreenPenalty`: 0.35
 - Evergreen classification requires `impact === 0 && novelty === 0`.
 - Relevance weight: 1.3x.
-- AI reranker (Sonnet) reorders top 30 stories; cached 15 minutes.
+- AI reranker (Sonnet) now runs at ingest-time and persists homepage order in `stories.homepage_rank`.
 - Unknown source default weight: 0.7.
 
 ## AI Relevance Gate
@@ -110,3 +110,6 @@ Last updated: 2026-02-28
 - 2026-02-28: Added post-grouping similar-story merge in ingest plus a one-time merge backfill script; ran live backfill iterations and merged 71 duplicate stories total.
 - 2026-02-28: Added semantic event-action normalization (`sue/lawsuit`, `close/closure`, etc.) in story-topic dedupe and a top-10 event-cluster cap with novelty exception.
 - 2026-02-28: Shifted to more liberal grouping: lower similarity threshold, event-aware merge heuristics, multi-pass ingest merges, and top-20 event-cluster suppression; live backfill merged 35 additional duplicate stories.
+- 2026-03-02: Newsletter subscribe success copy updated to "You're in! Pulse K-12 hits your inbox every Sunday."
+- 2026-03-02: Homepage now fetches top stories and wire articles in parallel (`Promise.all`) to remove serial request latency.
+- 2026-03-02: Moved AI homepage reranking from request-time to ingest-time; ingest now stores precomputed order in `stories.homepage_rank` and homepage reads that rank.
