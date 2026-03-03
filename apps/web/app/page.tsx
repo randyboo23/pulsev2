@@ -126,7 +126,7 @@ export default async function HomePage({
             )}
             <div className="featured-meta">
               <span className="featured-meta-item">
-                {featuredStory.source_count} sources reporting
+                {featuredStory.article_count} sources reporting
               </span>
               <span className="featured-meta-item">
                 {featuredStory.recent_count} updates in 24h
@@ -173,7 +173,7 @@ export default async function HomePage({
                     )}
                     <div className="story-meta">
                       <span className="story-stat">
-                        {story.source_count} outlets
+                        {story.article_count} sources
                       </span>
                       <span className="story-stat">
                         {story.recent_count} in 24h

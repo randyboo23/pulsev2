@@ -129,15 +129,15 @@ export default async function StoryPage({
         <div className="article-meta-bar">
           <span>Last updated {formatDate(story.last_seen_at)}</span>
           <span>
-            {outletCount} {outletCount === 1 ? "outlet" : "outlets"} · {articles.length}{" "}
-            {articles.length === 1 ? "article" : "articles"}
+            {articles.length} {articles.length === 1 ? "source" : "sources"} · {outletCount}{" "}
+            {outletCount === 1 ? "outlet" : "outlets"}
           </span>
         </div>
 
         {/* Sources Section */}
         <section className="sources-section">
           <h2 className="sources-header">
-            Coverage from {articles.length} {articles.length === 1 ? "Article" : "Articles"}
+            Coverage from {articles.length} {articles.length === 1 ? "Source" : "Sources"}
           </h2>
 
           <div className="story-list">
