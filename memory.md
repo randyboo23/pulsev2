@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 ---
 
@@ -121,3 +121,4 @@ Last updated: 2026-03-02
 - 2026-03-02: Tightened top-story event dedupe novelty override and required non-generic overlap for same-event suppression to better balance merge accuracy vs homepage diversity.
 - 2026-03-02: Added top-10 state diversity guardrails in ranking to limit one-state saturation and repeated state+topic clusters.
 - 2026-03-02: Unified homepage/detail source semantics to use article-link count as “sources,” with outlet count shown as secondary context on story detail.
+- 2026-03-03: Homepage data loading now fails open (all-settled top stories/wire queries + invalid-date guards) so transient backend/data issues render partial content instead of triggering a full page error.

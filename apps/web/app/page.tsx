@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 function formatDate(dateString: string | null) {
   if (!dateString) return "Unknown date";
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric"
@@ -16,6 +17,7 @@ function formatDate(dateString: string | null) {
 function formatFullDate(dateString: string | null) {
   if (!dateString) return "";
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -49,10 +51,19 @@ export default async function HomePage({
       ? searchParams.audience
       : undefined;
 
-  const [stories, articles] = await Promise.all([
+  const [storiesResult, articlesResult] = await Promise.allSettled([
     getTopStories(18, audience),
     getRecentArticles(12)
   ]);
+  const stories = storiesResult.status === "fulfilled" ? storiesResult.value : [];
+  const articles = articlesResult.status === "fulfilled" ? articlesResult.value : [];
+
+  if (storiesResult.status === "rejected") {
+    console.error("[home] failed to load top stories", storiesResult.reason);
+  }
+  if (articlesResult.status === "rejected") {
+    console.error("[home] failed to load recent articles", articlesResult.reason);
+  }
 
   const featuredStory = stories[0];
   const remainingStories = stories.slice(1);
