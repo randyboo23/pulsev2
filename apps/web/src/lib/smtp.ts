@@ -19,6 +19,17 @@ type SmtpResponse = {
   message: string;
 };
 
+function redactSmtpCommand(command: string | null) {
+  if (command === null) return "(greeting)";
+  const trimmed = command.trim();
+  if (!trimmed) return "(empty)";
+  const upper = trimmed.toUpperCase();
+  if (upper.startsWith("AUTH ")) return "[AUTH_REDACTED]";
+  // Base64 auth payloads (username/password) should never be echoed back in errors.
+  if (/^[A-Za-z0-9+/=]{8,}$/.test(trimmed)) return "[AUTH_REDACTED]";
+  return trimmed;
+}
+
 function normalizeLineEndings(text: string) {
   return text.replace(/\r?\n/g, "\r\n");
 }
@@ -109,7 +120,7 @@ async function sendSmtpCommand(
   const response = await waitForSmtpResponse(socket, timeoutMs);
   if (!expectedCodes.includes(response.code)) {
     throw new Error(
-      `SMTP command failed${command ? ` for "${command}"` : ""}: ${response.code} ${response.message}`
+      `SMTP command failed for "${redactSmtpCommand(command)}": ${response.code} ${response.message}`
     );
   }
   return response;

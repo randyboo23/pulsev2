@@ -154,6 +154,17 @@ function toStringArray(raw: unknown) {
     .filter((value) => value.length > 0);
 }
 
+function sanitizeEmailErrorForDisplay(raw: string | null) {
+  if (!raw) return null;
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  const redactedAuthCommand = collapsed.replace(
+    /for\s+"[A-Za-z0-9+/=]{8,}"/gi,
+    'for "[AUTH_REDACTED]"'
+  );
+  const redactedGeneric = redactedAuthCommand.replace(/[A-Za-z0-9+/=]{24,}/g, "[REDACTED]");
+  return redactedGeneric;
+}
+
 export default async function AdminStoriesPage() {
   if (!isAdmin()) {
     redirect("/admin/login");
@@ -293,7 +304,7 @@ export default async function AdminStoriesPage() {
         createdAt: event.created_at,
         sent: detail.sent === true,
         recipients: toStringArray(detail.to),
-        error: detail.error ? String(detail.error) : null
+        error: detail.error ? sanitizeEmailErrorForDisplay(String(detail.error)) : null
       };
     }
   } catch {

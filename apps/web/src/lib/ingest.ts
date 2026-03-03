@@ -135,7 +135,9 @@ const GUARDRAIL_ALERT_EMAIL_SMTP_PORT = envBoundedInt(
   65_535
 );
 const GUARDRAIL_ALERT_EMAIL_SMTP_USER = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_USER ?? "").trim();
-const GUARDRAIL_ALERT_EMAIL_SMTP_PASS = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_PASS ?? "").trim();
+const GUARDRAIL_ALERT_EMAIL_SMTP_PASS = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_PASS ?? "")
+  .replace(/\s+/g, "")
+  .trim();
 const GUARDRAIL_ALERT_EMAIL_TO = String(process.env.GUARDRAIL_ALERT_EMAIL_TO ?? "")
   .split(/[;,]/)
   .map((value) => value.trim())
