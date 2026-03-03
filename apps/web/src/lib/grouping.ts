@@ -123,6 +123,111 @@ const GENERIC_CONTEXT_TOKENS = new Set([
 ]);
 
 const MERGE_EVENT_CLUSTER_THRESHOLD = 0.3;
+const SPLIT_DOMINANCE_RATIO_THRESHOLD = 0.67;
+
+const STATE_GEO_ALIASES: Record<string, string[]> = {
+  alabama: ["alabama"],
+  alaska: ["alaska"],
+  arizona: ["arizona", "phoenix"],
+  arkansas: ["arkansas"],
+  california: ["california", "los angeles", "lausd", "oakland", "sacramento", "san diego", "san francisco"],
+  colorado: ["colorado", "denver"],
+  connecticut: ["connecticut"],
+  delaware: ["delaware"],
+  florida: ["florida", "miami", "orlando", "tampa"],
+  georgia: ["georgia", "atlanta"],
+  hawaii: ["hawaii"],
+  idaho: ["idaho"],
+  illinois: ["illinois", "chicago", "cps"],
+  indiana: ["indiana", "indianapolis", "indy"],
+  iowa: ["iowa"],
+  kansas: ["kansas"],
+  kentucky: ["kentucky"],
+  louisiana: ["louisiana", "new orleans"],
+  maine: ["maine"],
+  maryland: ["maryland", "baltimore"],
+  massachusetts: ["massachusetts", "boston"],
+  michigan: ["michigan", "detroit"],
+  minnesota: ["minnesota", "minneapolis", "st paul"],
+  mississippi: ["mississippi"],
+  missouri: ["missouri", "st louis", "kansas city"],
+  montana: ["montana"],
+  nebraska: ["nebraska"],
+  nevada: ["nevada", "las vegas"],
+  "new hampshire": ["new hampshire"],
+  "new jersey": ["new jersey", "newark"],
+  "new mexico": ["new mexico"],
+  "new york": ["new york", "new york city", "nyc", "brooklyn", "bronx", "queens"],
+  "north carolina": ["north carolina", "charlotte", "raleigh"],
+  "north dakota": ["north dakota"],
+  ohio: ["ohio", "columbus", "cleveland", "cincinnati"],
+  oklahoma: ["oklahoma"],
+  oregon: ["oregon", "portland"],
+  pennsylvania: ["pennsylvania", "philadelphia", "philly", "pittsburgh"],
+  "rhode island": ["rhode island"],
+  "south carolina": ["south carolina"],
+  "south dakota": ["south dakota"],
+  tennessee: ["tennessee", "memphis", "nashville"],
+  texas: ["texas", "houston", "dallas", "austin", "san antonio"],
+  utah: ["utah"],
+  vermont: ["vermont"],
+  virginia: ["virginia", "richmond"],
+  washington: ["washington state", "seattle"],
+  "west virginia": ["west virginia"],
+  wisconsin: ["wisconsin", "milwaukee"],
+  wyoming: ["wyoming"],
+  "district of columbia": ["district of columbia", "washington dc", "washington d c", "dc"]
+};
+
+const STATE_GEO_ALIAS_INDEX = Object.entries(STATE_GEO_ALIASES).map(([state, aliases]) => ({
+  state,
+  aliases: aliases.map((alias) => normalizeGeoText(alias).trim())
+}));
+
+const ENTITY_TOKEN_STOPWORDS = new Set([
+  "school",
+  "schools",
+  "district",
+  "districts",
+  "student",
+  "students",
+  "teacher",
+  "teachers",
+  "state",
+  "states",
+  "board",
+  "boards",
+  "education",
+  "public",
+  "official",
+  "officials",
+  "families",
+  "parents",
+  "parent",
+  "lawsuit",
+  "investigation",
+  "closure",
+  "vote",
+  "funding",
+  "budget",
+  "policy",
+  "bill",
+  "bills",
+  "house",
+  "senate",
+  "legislature",
+  "legislative",
+  "session",
+  "news",
+  "report",
+  "reports",
+  "amid",
+  "after",
+  "before",
+  "over",
+  "new",
+  "latest"
+]);
 
 type MergeCandidateStory = {
   id: string;
@@ -133,6 +238,23 @@ type MergeCandidateStory = {
   status: string | null;
   last_seen_at: string;
   article_count: number;
+};
+
+type SplitCandidateStory = {
+  id: string;
+  story_key: string | null;
+  title: string;
+  last_seen_at: string;
+  article_count: number;
+};
+
+type SplitStoryArticle = {
+  article_id: string;
+  title: string | null;
+  summary: string | null;
+  url: string;
+  timestamp: string | null;
+  is_primary: boolean;
 };
 
 export type MergeSimilarStoriesOptions = {
@@ -150,11 +272,31 @@ export type MergeSimilarStoriesResult = {
   merged: number;
 };
 
+export type SplitMixedStoriesOptions = {
+  lookbackDays?: number;
+  candidateLimit?: number;
+  maxSplits?: number;
+  dryRun?: boolean;
+};
+
+export type SplitMixedStoriesResult = {
+  candidates: number;
+  flagged: number;
+  split: number;
+};
+
 type MergeOverlapDetails = {
   ratio: number;
   sharedTokens: number;
   sharedActionTokens: number;
   sharedStrongTokens: number;
+};
+
+type StoryStateCache = Map<string, string | null>;
+type StoryEntityTokenCache = Map<string, Set<string>>;
+
+type Queryable = {
+  query: (queryText: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 };
 
 function normalizeTitle(title: string) {
@@ -163,6 +305,77 @@ function normalizeTitle(title: string) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeGeoText(text: string) {
+  return ` ${text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+}
+
+function inferStateFromText(text: string) {
+  const normalized = normalizeGeoText(text);
+  if (normalized.trim().length === 0) return null;
+
+  for (const entry of STATE_GEO_ALIAS_INDEX) {
+    for (const alias of entry.aliases) {
+      if (alias.length < 2) continue;
+      if (normalized.includes(` ${alias} `)) {
+        return entry.state;
+      }
+    }
+  }
+
+  return null;
+}
+
+function inferStoryState(story: Pick<MergeCandidateStory, "id" | "title" | "story_key">, cache: StoryStateCache) {
+  const cached = cache.get(story.id);
+  if (cached !== undefined) return cached;
+
+  const storyText = `${String(story.title ?? "")} ${String(story.story_key ?? "").replace(/-/g, " ")}`.trim();
+  const state = inferStateFromText(storyText);
+  cache.set(story.id, state);
+  return state;
+}
+
+function getStoryEntityTokens(story: MergeCandidateStory, cache: StoryEntityTokenCache) {
+  const cached = cache.get(story.id);
+  if (cached) return cached;
+
+  const rawWords = String(story.title ?? "")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ""))
+    .filter(Boolean);
+
+  const tokens = new Set<string>();
+  rawWords.forEach((rawWord, index) => {
+    const isAllCaps = /^[A-Z0-9]{2,}$/.test(rawWord);
+    const isCapitalized = /^[A-Z][a-z]+$/.test(rawWord);
+    if (!isAllCaps && !(index > 0 && isCapitalized)) return;
+
+    const normalized = canonicalizeMergeToken(rawWord);
+    if (!normalized || normalized.length < 3) return;
+    if (STOPWORDS.has(normalized)) return;
+    if (GENERIC_CONTEXT_TOKENS.has(normalized)) return;
+    if (EVENT_ACTION_TOKENS.has(normalized)) return;
+    if (ENTITY_TOKEN_STOPWORDS.has(normalized)) return;
+
+    tokens.add(normalized);
+  });
+
+  cache.set(story.id, tokens);
+  return tokens;
+}
+
+function countSharedTokens(a: Set<string>, b: Set<string>) {
+  let shared = 0;
+  for (const token of a) {
+    if (b.has(token)) shared += 1;
+  }
+  return shared;
 }
 
 function normalizeMergeToken(token: string) {
@@ -258,7 +471,33 @@ function mergeOverlapDetails(a: MergeCandidateStory, b: MergeCandidateStory, cac
   };
 }
 
-function shouldMergeStories(details: MergeOverlapDetails, similarityThreshold: number) {
+function shouldMergeStories(
+  a: MergeCandidateStory,
+  b: MergeCandidateStory,
+  details: MergeOverlapDetails,
+  similarityThreshold: number,
+  stateCache: StoryStateCache,
+  entityTokenCache: StoryEntityTokenCache
+) {
+  const stateA = inferStoryState(a, stateCache);
+  const stateB = inferStoryState(b, stateCache);
+  if (stateA && stateB && stateA !== stateB) {
+    return false;
+  }
+
+  const entityA = getStoryEntityTokens(a, entityTokenCache);
+  const entityB = getStoryEntityTokens(b, entityTokenCache);
+  const sharedEntityTokens = countSharedTokens(entityA, entityB);
+  if (
+    entityA.size >= 2 &&
+    entityB.size >= 2 &&
+    sharedEntityTokens === 0 &&
+    details.sharedStrongTokens === 0 &&
+    details.sharedActionTokens >= 1
+  ) {
+    return false;
+  }
+
   if (details.ratio >= similarityThreshold) {
     return details.sharedStrongTokens >= 1 || details.sharedActionTokens >= 2;
   }
@@ -315,6 +554,21 @@ async function findStoryByKey(storyKey: string) {
      order by last_seen_at desc
      limit 1`,
     [storyKey]
+  );
+
+  return result.rows[0]?.id as string | undefined;
+}
+
+async function findStoryByKeyExcluding(storyKey: string, excludedStoryId: string, lookbackDays = 14) {
+  const result = await pool.query(
+    `select id from stories
+     where story_key = $1
+       and id <> $2
+       and coalesce(status, 'active') <> 'hidden'
+       and last_seen_at >= now() - make_interval(days => $3::int)
+     order by last_seen_at desc
+     limit 1`,
+    [storyKey, excludedStoryId, lookbackDays]
   );
 
   return result.rows[0]?.id as string | undefined;
@@ -432,6 +686,8 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
 
   const stories = storiesResult.rows as MergeCandidateStory[];
   const tokenCache = new Map<string, string[]>();
+  const stateCache: StoryStateCache = new Map();
+  const entityTokenCache: StoryEntityTokenCache = new Map();
   const sourceUsed = new Set<string>();
   const plans: { sourceId: string; targetId: string }[] = [];
   let evaluatedPairs = 0;
@@ -449,7 +705,7 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
 
       evaluatedPairs += 1;
       const overlap = mergeOverlapDetails(a, b, tokenCache);
-      if (!shouldMergeStories(overlap, similarityThreshold)) continue;
+      if (!shouldMergeStories(a, b, overlap, similarityThreshold, stateCache, entityTokenCache)) continue;
 
       const { target, source } = pickMergeTarget(a, b);
       if (sourceUsed.has(source.id) || sourceUsed.has(target.id)) continue;
@@ -531,5 +787,301 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
     evaluatedPairs,
     suggested: plans.length,
     merged
+  };
+}
+
+type DominantStateDecision = {
+  state: string;
+  dominantCount: number;
+  source: "story" | "majority";
+};
+
+function resolveDominantState(
+  story: SplitCandidateStory,
+  articleStates: Array<{ state: string | null }>,
+  stateCache: StoryStateCache
+): DominantStateDecision | null {
+  const counts = new Map<string, number>();
+  for (const entry of articleStates) {
+    if (!entry.state) continue;
+    counts.set(entry.state, (counts.get(entry.state) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) return null;
+
+  const storyState = inferStoryState(story, stateCache);
+  if (storyState) {
+    const storyStateCount = counts.get(storyState) ?? 0;
+    if (storyStateCount >= 1) {
+      return {
+        state: storyState,
+        dominantCount: storyStateCount,
+        source: "story"
+      };
+    }
+  }
+
+  let topState: string | null = null;
+  let topCount = 0;
+  let runnerUpCount = 0;
+  for (const [state, count] of counts.entries()) {
+    if (count > topCount) {
+      runnerUpCount = topCount;
+      topCount = count;
+      topState = state;
+    } else if (count > runnerUpCount) {
+      runnerUpCount = count;
+    }
+  }
+
+  if (!topState || topCount < 2 || topCount <= runnerUpCount) return null;
+  if (topCount / articleStates.length < SPLIT_DOMINANCE_RATIO_THRESHOLD) return null;
+
+  return {
+    state: topState,
+    dominantCount: topCount,
+    source: "majority"
+  };
+}
+
+async function ensureStoryHasPrimary(queryable: Queryable, storyId: string) {
+  await queryable.query(
+    `with has_primary as (
+       select 1
+       from story_articles
+       where story_id = $1
+         and is_primary
+       limit 1
+     ),
+     fallback as (
+       select sa.article_id
+       from story_articles sa
+       join articles a on a.id = sa.article_id
+       where sa.story_id = $1
+       order by coalesce(a.published_at, a.fetched_at) desc
+       limit 1
+     )
+     update story_articles sa
+     set is_primary = true
+     from fallback
+     where sa.story_id = $1
+       and sa.article_id = fallback.article_id
+       and not exists (select 1 from has_primary)`,
+    [storyId]
+  );
+}
+
+async function refreshStoryLastSeen(queryable: Queryable, storyId: string) {
+  await queryable.query(
+    `update stories
+     set last_seen_at = coalesce(
+           (
+             select max(coalesce(a.published_at, a.fetched_at))
+             from story_articles sa
+             join articles a on a.id = sa.article_id
+             where sa.story_id = $1
+           ),
+           last_seen_at
+         ),
+         updated_at = now()
+     where id = $1`,
+    [storyId]
+  );
+}
+
+async function moveOutlierArticle(
+  sourceStoryId: string,
+  article: SplitStoryArticle,
+  lookbackDays: number
+) {
+  const title = String(article.title ?? "").trim();
+  if (!title) return false;
+
+  const storyKey = createStoryKey(title);
+  if (!storyKey) return false;
+
+  const timestampValue = article.timestamp ? new Date(article.timestamp) : new Date();
+  const timestamp = Number.isNaN(timestampValue.getTime()) ? new Date() : timestampValue;
+  let targetStoryId = await findStoryByKeyExcluding(storyKey, sourceStoryId, Math.max(lookbackDays, 14));
+  let targetCreated = false;
+  try {
+    if (!targetStoryId) {
+      const created = await pool.query(
+        `insert into stories (story_key, title, summary, first_seen_at, last_seen_at)
+         values ($1, $2, $3, $4, $4)
+         returning id`,
+        [storyKey, title, article.summary ?? null, timestamp]
+      );
+      targetStoryId = created.rows[0]?.id as string | undefined;
+      targetCreated = Boolean(targetStoryId);
+    }
+
+    if (!targetStoryId) {
+      throw new Error("failed_to_resolve_target_story");
+    }
+
+    const sourceLink = await pool.query(
+      `select article_id
+       from story_articles
+       where story_id = $1
+         and article_id = $2
+       limit 1`,
+      [sourceStoryId, article.article_id]
+    );
+    if (sourceLink.rows.length === 0) {
+      return false;
+    }
+
+    const alreadyOnTarget = await pool.query(
+      `select article_id
+       from story_articles
+       where story_id = $1
+         and article_id = $2
+       limit 1`,
+      [targetStoryId, article.article_id]
+    );
+
+    if (alreadyOnTarget.rows.length > 0) {
+      await pool.query(
+        `delete from story_articles
+         where story_id = $1
+           and article_id = $2`,
+        [sourceStoryId, article.article_id]
+      );
+    } else {
+      const moved = await pool.query(
+        `update story_articles
+         set story_id = $1,
+             is_primary = $4
+         where story_id = $2
+           and article_id = $3
+         returning article_id`,
+        [targetStoryId, sourceStoryId, article.article_id, targetCreated]
+      );
+      if (moved.rows.length !== 1) {
+        throw new Error(`expected_1_row_moved_got_${moved.rows.length}`);
+      }
+    }
+
+    await pool.query(
+      `update stories
+       set last_seen_at = greatest(last_seen_at, $2),
+           updated_at = now()
+       where id = $1`,
+      [targetStoryId, timestamp]
+    );
+    await ensureStoryHasPrimary(pool, targetStoryId);
+
+    const sourceCount = await pool.query(
+      `select count(*)::int as count
+       from story_articles
+       where story_id = $1`,
+      [sourceStoryId]
+    );
+    const remaining = Number(sourceCount.rows[0]?.count ?? 0);
+    if (remaining === 0) {
+      await pool.query(`delete from stories where id = $1`, [sourceStoryId]);
+    } else {
+      await refreshStoryLastSeen(pool, sourceStoryId);
+      await ensureStoryHasPrimary(pool, sourceStoryId);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function splitMixedStories(
+  options: SplitMixedStoriesOptions = {}
+): Promise<SplitMixedStoriesResult> {
+  const lookbackDays = Math.max(1, Math.floor(options.lookbackDays ?? 5));
+  const candidateLimit = Math.max(20, Math.floor(options.candidateLimit ?? 200));
+  const maxSplits = Math.max(0, Math.floor(options.maxSplits ?? 20));
+  const dryRun = Boolean(options.dryRun);
+
+  if (maxSplits === 0) {
+    return { candidates: 0, flagged: 0, split: 0 };
+  }
+
+  const storiesResult = await pool.query(
+    `select
+       s.id,
+       s.story_key,
+       coalesce(s.editor_title, s.title) as title,
+       s.last_seen_at,
+       count(sa.article_id)::int as article_count
+     from stories s
+     join story_articles sa on sa.story_id = s.id
+     join articles a on a.id = sa.article_id
+     where coalesce(s.status, 'active') <> 'hidden'
+       and s.last_seen_at >= now() - make_interval(days => $1::int)
+       and coalesce(a.quality_label, 'unknown') <> 'non_article'
+     group by s.id
+     having count(sa.article_id) >= 2
+     order by s.last_seen_at desc
+     limit $2`,
+    [lookbackDays, candidateLimit]
+  );
+
+  const candidates = storiesResult.rows as SplitCandidateStory[];
+  const stateCache: StoryStateCache = new Map();
+  let flagged = 0;
+  let split = 0;
+
+  for (const story of candidates) {
+    if (!story) continue;
+    if (!dryRun && split >= maxSplits) break;
+
+    const articleResult = await pool.query<SplitStoryArticle>(
+      `select
+         sa.article_id,
+         sa.is_primary,
+         a.title,
+         a.summary,
+         a.url,
+         coalesce(a.published_at, a.fetched_at) as timestamp
+       from story_articles sa
+       join articles a on a.id = sa.article_id
+       where sa.story_id = $1
+         and coalesce(a.quality_label, 'unknown') <> 'non_article'
+       order by coalesce(a.published_at, a.fetched_at) desc`,
+      [story.id]
+    );
+
+    const articles = articleResult.rows;
+    if (articles.length < 2) continue;
+
+    const articleStates = articles.map((article) => ({
+      article,
+      state: inferStateFromText(`${String(article.title ?? "")} ${article.url}`)
+    }));
+    const dominantState = resolveDominantState(
+      story,
+      articleStates.map((entry) => ({ state: entry.state })),
+      stateCache
+    );
+    if (!dominantState) continue;
+    if (dominantState.dominantCount < 1) continue;
+
+    const outliers = articleStates.filter((entry) => entry.state && entry.state !== dominantState.state);
+    if (outliers.length === 0) continue;
+
+    flagged += outliers.length;
+
+    if (dryRun) continue;
+    const toMove = outliers[0]?.article;
+    if (!toMove) continue;
+
+    const moved = await moveOutlierArticle(story.id, toMove, lookbackDays);
+    if (moved) {
+      split += 1;
+    }
+  }
+
+  return {
+    candidates: candidates.length,
+    flagged,
+    split
   };
 }

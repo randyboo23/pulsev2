@@ -37,6 +37,8 @@ Summary Adjudication -- compare candidates (existing / rss / scrape / llm / fall
     v
 Grouping (grouping.ts) -- lexical title-key matching + similar-story merge pass
     |                      merge pass uses event-aware token normalization + overlap and runs multi-pass per ingest
+    |                      merge vetoes block cross-state and entity-conflict merges
+    |                      post-merge split pass detaches clear mixed-cluster outlier articles
     |                      PLANNED: embedding-based clustering (see docs/embedding-clustering-spec.md)
     |
     v
@@ -164,6 +166,6 @@ scripts/
 - Admin pages use "legacy" class names -- they work, low priority to update.
 
 ## Known Limits
-- Grouping starts lexical (`story_key`) and then does a token-overlap merge pass; semantic edge cases still remain until embedding clustering lands.
+- Grouping starts lexical (`story_key`) and then does a token-overlap merge pass with state/entity vetoes plus mixed-cluster outlier splits; semantic edge cases still remain until embedding clustering lands.
 - Worker orchestration (`apps/worker`) is not yet the runtime execution path.
 - No fixture-based regression suite yet for clustering/summary/ranking.

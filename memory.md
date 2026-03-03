@@ -41,6 +41,9 @@ Last updated: 2026-03-03
 - Similar-story merge now requires at least one non-generic shared token for weak overlaps, and blocks high-overlap merges that only share generic/legal-action tokens.
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
+- Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
+- Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
+- Ingest response now includes mixed-cluster audit metrics (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -122,3 +125,4 @@ Last updated: 2026-03-03
 - 2026-03-02: Added top-10 state diversity guardrails in ranking to limit one-state saturation and repeated state+topic clusters.
 - 2026-03-02: Unified homepage/detail source semantics to use article-link count as “sources,” with outlet count shown as secondary context on story detail.
 - 2026-03-03: Homepage data loading now fails open (all-settled top stories/wire queries + invalid-date guards) so transient backend/data issues render partial content instead of triggering a full page error.
+- 2026-03-03: Added strict merge vetoes for cross-state/entity conflicts and a post-merge auto-split pass for mixed clusters, plus ingest-level mixed-cluster audit metrics.

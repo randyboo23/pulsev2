@@ -39,6 +39,8 @@ Techmeme for US K-12 education news.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Automatic homepage-rank refresh on ingest (`refreshHomepageRanks`) so homepage order is precomputed in DB.
 - Story grouping by title key, plus automatic similar-story merge pass during ingest.
+- Story-merge guardrails now hard-veto cross-state/entity-conflict merges and run a post-merge outlier split pass for mixed clusters.
+- Ingest telemetry now reports mixed-cluster audit counters (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Top-story ranking now applies title-topic diversity suppression, semantic event-action normalization, and a top-20 event-cluster cap (with strict novelty override) to reduce same-event repeats.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.

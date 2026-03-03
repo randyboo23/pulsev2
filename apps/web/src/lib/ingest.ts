@@ -2,7 +2,7 @@ import Parser from "rss-parser";
 import { pool } from "./db";
 import { getDefaultFeeds } from "./feeds";
 import { TRUSTED_SITES, SOURCE_TIERS } from "@pulse/core";
-import { groupUngroupedArticles, mergeSimilarStories } from "./grouping";
+import { groupUngroupedArticles, mergeSimilarStories, splitMixedStories } from "./grouping";
 import { refreshHomepageRanks } from "./stories";
 
 const parser = new Parser({
@@ -260,6 +260,9 @@ type IngestResult = {
   unresolvedGoogleSkipped: number;
   grouped: number;
   mergedStories: number;
+  mixedStoryCandidates: number;
+  mixedStoryOutliers: number;
+  mixedStoriesSplit: number;
   parseFailures: number;
   qualityChecked: number;
   nonArticleBlocked: number;
@@ -2632,6 +2635,11 @@ export async function ingestFeeds(): Promise<IngestResult> {
     mergedStories += mergePass.merged;
     if (mergePass.merged === 0) break;
   }
+  const splitPass = await splitMixedStories({
+    lookbackDays: 5,
+    candidateLimit: 220,
+    maxSplits: 24
+  });
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
   const rankRefresh = await refreshHomepageRanks(60);
 
@@ -2644,6 +2652,9 @@ export async function ingestFeeds(): Promise<IngestResult> {
     unresolvedGoogleSkipped,
     grouped,
     mergedStories,
+    mixedStoryCandidates: splitPass.candidates,
+    mixedStoryOutliers: splitPass.flagged,
+    mixedStoriesSplit: splitPass.split,
     parseFailures,
     qualityChecked: qualityScan.qualityChecked,
     nonArticleBlocked,
