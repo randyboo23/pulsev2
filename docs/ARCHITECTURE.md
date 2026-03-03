@@ -53,7 +53,8 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
 Top-Story Publish Gate (ingest.ts) -- audits candidate top slots before persisted ranking
     |                                  flags mixed-state/entity-conflict clusters using merge-veto heuristics
     |                                  enforces state/state+topic saturation caps in the top window
-    |                                  auto-demotes flagged non-pinned stories and logs `ingest_top_story_gate`
+    |                                  applies stale-slot and thin-roundup demotions for low-momentum top stories
+    |                                  auto-demotes flagged non-pinned stories and logs `ingest_top_story_gate` each ingest run
     |
     v
 AI Reranking (ingest.ts -> stories.ts) -- Sonnet reorders top stories by editorial judgment

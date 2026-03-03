@@ -107,6 +107,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 
 ## Grouping Guardrails
 - Ingest emits grouping anomaly alerts into `admin_events` (`event_type = ingest_guardrail_alert`) when merge/split metrics cross thresholds.
+- Ingest also logs top-slot publish gate runs to `admin_events` (`event_type = ingest_top_story_gate`) every cycle.
 - Optional threshold env vars:
   - `INGEST_ALERT_MERGED_STORIES` (default `25`)
   - `INGEST_ALERT_MERGE_TO_GROUPED_RATIO` (default `0.65`)
@@ -116,8 +117,10 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `TOP_STORY_PUBLISH_GATE_SCAN_LIMIT` (default `20`)
   - `TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN` (default `2`)
   - `TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN` (default `2`)
-  - `TOP_STORY_PUBLISH_GATE_STATE_LIMIT` (default `2`)
+  - `TOP_STORY_PUBLISH_GATE_STATE_LIMIT` (default `1`)
   - `TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT` (default `1`)
+  - `TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS` (default `72`)
+  - `TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS` (default `120`)
 
 ## One-Time Story Backfill Merge
 - Run from repo root to merge existing duplicate story clusters:

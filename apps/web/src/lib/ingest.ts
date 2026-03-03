@@ -53,13 +53,33 @@ const TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN = envBoundedInt(
   1,
   6
 );
-const TOP_STORY_PUBLISH_GATE_STATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_STATE_LIMIT", 2, 1, 4);
+const TOP_STORY_PUBLISH_GATE_STATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_STATE_LIMIT", 1, 1, 4);
 const TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT = envBoundedInt(
   "TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT",
   1,
   1,
   3
 );
+const TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS",
+  72,
+  24,
+  336
+);
+const TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS",
+  120,
+  48,
+  336
+);
+
+const TOP_SLOT_ROUNDUP_PATTERNS = [
+  /\bnumber of the week\b/i,
+  /\bweek in review\b/i,
+  /\broundup\b/i,
+  /\ba look at\b/i,
+  /\bwhat to know\b/i
+];
 
 let lastFirecrawlBudgetWarningDay = "";
 
@@ -394,6 +414,9 @@ type TopStoryPublishGateDetail = {
   state: string | null;
   topic: string;
   articleCount: number;
+  sourceCount: number;
+  recentCount: number;
+  hoursSinceLatest: number;
   stateMismatchCount: number;
   entityConflictCount: number;
   reasons: string[];
@@ -2477,6 +2500,7 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
   }
 
   const flaggedByStoryId = new Map<string, TopStoryPublishGateDetail>();
+  const now = Date.now();
   const ensureDetail = (params: {
     storyId: string;
     rank: number;
@@ -2485,6 +2509,9 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     state: string | null;
     topic: string;
     articleCount: number;
+    sourceCount: number;
+    recentCount: number;
+    hoursSinceLatest: number;
     stateMismatchCount: number;
     entityConflictCount: number;
   }) => {
@@ -2498,6 +2525,9 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
       state: params.state,
       topic: params.topic,
       articleCount: params.articleCount,
+      sourceCount: params.sourceCount,
+      recentCount: params.recentCount,
+      hoursSinceLatest: params.hoursSinceLatest,
       stateMismatchCount: params.stateMismatchCount,
       entityConflictCount: params.entityConflictCount,
       reasons: []
@@ -2511,33 +2541,73 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
 
     const title = String(story.editor_title ?? story.title ?? "").trim();
     if (!title) continue;
-    const articleTitles = articleTitlesByStory.get(story.id) ?? [];
-    if (articleTitles.length < 3) continue;
+    const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+    const recentCount = Math.max(0, Number(story.recent_count ?? 0));
+    const storyArticleCount = Math.max(0, Number(story.article_count ?? 0));
+    const latestAtRaw = new Date(story.latest_at).getTime();
+    const hoursSinceLatest = Number.isFinite(latestAtRaw)
+      ? Math.max(0, (now - latestAtRaw) / (1000 * 60 * 60))
+      : 0;
 
+    const articleTitles = articleTitlesByStory.get(story.id) ?? [];
     let stateMismatchCount = 0;
     let entityConflictCount = 0;
 
-    for (const articleTitle of articleTitles) {
-      const decision = evaluateStoryMergeDecision(
-        {
-          id: story.id,
-          title,
-          status: story.status,
-          article_count: Math.max(1, Number(story.article_count ?? 1))
-        },
-        { title: articleTitle },
-        0.56
-      );
-      if (decision.vetoReason === "state_mismatch") {
-        stateMismatchCount += 1;
-      } else if (decision.vetoReason === "entity_conflict") {
-        entityConflictCount += 1;
+    if (articleTitles.length >= 3) {
+      for (const articleTitle of articleTitles) {
+        const decision = evaluateStoryMergeDecision(
+          {
+            id: story.id,
+            title,
+            status: story.status,
+            article_count: Math.max(1, Number(story.article_count ?? 1))
+          },
+          { title: articleTitle },
+          0.56
+        );
+        if (decision.vetoReason === "state_mismatch") {
+          stateMismatchCount += 1;
+        } else if (decision.vetoReason === "entity_conflict") {
+          entityConflictCount += 1;
+        }
       }
     }
 
     const state = inferGeoStateFromTitle(title);
     const topic = inferGeoTopicFromTitle(title);
     const reasons: string[] = [];
+
+    if (
+      index < 10 &&
+      storyArticleCount <= 1 &&
+      sourceCount <= 1 &&
+      recentCount === 0
+    ) {
+      reasons.push("thin_single_source_top_slot");
+    }
+
+    if (
+      index < 10 &&
+      sourceCount <= 1 &&
+      TOP_SLOT_ROUNDUP_PATTERNS.some((pattern) => pattern.test(title))
+    ) {
+      reasons.push("roundup_single_source_top_slot");
+    }
+
+    if (
+      index < 3 &&
+      recentCount === 0 &&
+      hoursSinceLatest >= TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS
+    ) {
+      reasons.push(`stale_top3:${Math.round(hoursSinceLatest)}h`);
+    } else if (
+      index < 10 &&
+      recentCount === 0 &&
+      hoursSinceLatest >= TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS
+    ) {
+      reasons.push(`stale_top10:${Math.round(hoursSinceLatest)}h`);
+    }
+
     if (stateMismatchCount >= TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN) {
       reasons.push(`state_mismatch_articles:${stateMismatchCount}/${articleTitles.length}`);
     }
@@ -2557,6 +2627,9 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
         state,
         topic,
         articleCount: articleTitles.length,
+        sourceCount,
+        recentCount,
+        hoursSinceLatest: Number(hoursSinceLatest.toFixed(1)),
         stateMismatchCount,
         entityConflictCount
       });
@@ -2579,38 +2652,46 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     const stateCount = stateCounts.get(state) ?? 0;
     const stateTopicKey = `${state}:${topic}`;
     const stateTopicCount = stateTopicCounts.get(stateTopicKey) ?? 0;
+    const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+    const recentCount = Math.max(0, Number(story.recent_count ?? 0));
+    const latestAtRaw = new Date(story.latest_at).getTime();
+    const hoursSinceLatest = Number.isFinite(latestAtRaw)
+      ? Math.max(0, (now - latestAtRaw) / (1000 * 60 * 60))
+      : 0;
+    const existingDetail = flaggedByStoryId.get(story.id);
+    const alreadyFlagged = Boolean(existingDetail && existingDetail.reasons.length > 0);
+    if (alreadyFlagged) continue;
 
     if (story.status !== "pinned") {
-      const detail = flaggedByStoryId.get(story.id);
-      const alreadyFlagged = Boolean(detail && detail.reasons.length > 0);
-      if (!alreadyFlagged) {
-        let diversityReason: string | null = null;
-        if (stateCount >= TOP_STORY_PUBLISH_GATE_STATE_LIMIT) {
-          diversityReason = `state_saturation:${state}`;
-        } else if (
-          topic !== "general" &&
-          stateTopicCount >= TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT
-        ) {
-          diversityReason = `state_topic_saturation:${state}:${topic}`;
-        }
+      let diversityReason: string | null = null;
+      if (stateCount >= TOP_STORY_PUBLISH_GATE_STATE_LIMIT) {
+        diversityReason = `state_saturation:${state}`;
+      } else if (
+        topic !== "general" &&
+        stateTopicCount >= TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT
+      ) {
+        diversityReason = `state_topic_saturation:${state}:${topic}`;
+      }
 
-        if (diversityReason) {
-          const created = ensureDetail({
-            storyId: story.id,
-            rank: index + 1,
-            title,
-            status: story.status,
-            state,
-            topic,
-            articleCount: (articleTitlesByStory.get(story.id) ?? []).length,
-            stateMismatchCount: 0,
-            entityConflictCount: 0
-          });
-          if (!created.reasons.includes(diversityReason)) {
-            created.reasons.push(diversityReason);
-          }
-          continue;
+      if (diversityReason) {
+        const created = ensureDetail({
+          storyId: story.id,
+          rank: index + 1,
+          title,
+          status: story.status,
+          state,
+          topic,
+          articleCount: (articleTitlesByStory.get(story.id) ?? []).length,
+          sourceCount,
+          recentCount,
+          hoursSinceLatest: Number(hoursSinceLatest.toFixed(1)),
+          stateMismatchCount: 0,
+          entityConflictCount: 0
+        });
+        if (!created.reasons.includes(diversityReason)) {
+          created.reasons.push(diversityReason);
         }
+        continue;
       }
     }
 
@@ -2638,22 +2719,6 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     );
     demoted = updateResult.rows.length;
 
-    await recordTopStoryPublishGateEvent({
-      checked: gateStories.length,
-      flagged: details.length,
-      demoted,
-      publishLimit,
-      scanLimit,
-      details: details.map((detail) => ({
-        storyId: detail.storyId,
-        rank: detail.rank,
-        title: detail.title,
-        state: detail.state,
-        topic: detail.topic,
-        reasons: detail.reasons
-      }))
-    });
-
     if (demoted > 0) {
       await recordIngestGuardrailAlert({
         guardrailAlerts: [`top_story_publish_gate_demotions:${demoted}`],
@@ -2664,6 +2729,26 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
       });
     }
   }
+
+  await recordTopStoryPublishGateEvent({
+    checked: gateStories.length,
+    flagged: details.length,
+    demoted,
+    publishLimit,
+    scanLimit,
+    details: details.map((detail) => ({
+      storyId: detail.storyId,
+      rank: detail.rank,
+      title: detail.title,
+      state: detail.state,
+      topic: detail.topic,
+      articleCount: detail.articleCount,
+      sourceCount: detail.sourceCount,
+      recentCount: detail.recentCount,
+      hoursSinceLatest: detail.hoursSinceLatest,
+      reasons: detail.reasons
+    }))
+  });
 
   return {
     checked: gateStories.length,

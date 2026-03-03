@@ -41,7 +41,7 @@ Last updated: 2026-03-03
 - Similar-story merge now requires at least one non-generic shared token for weak overlaps, and blocks high-overlap merges that only share generic/legal-action tokens.
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
-- Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict) and overflow state/topic saturation.
+- Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
 - Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
 - Ingest response now includes mixed-cluster audit metrics (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
@@ -134,4 +134,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added `qa:guardrails` reporting script for quick alert monitoring from `admin_events`.
 - 2026-03-03: `/admin/stories` now pins current homepage top stories to the top of the list and labels each with its homepage rank for faster editorial review.
 - 2026-03-03: Added manual `demoted` story status to push stories out of top homepage slots without fully hiding them; admin stories now surfaces homepage `#1-#20` context (`Top` + `Next` labels) for easier promotion decisions.
-- 2026-03-03: Added ingest-time top-story publish gate (`ingest_top_story_gate` events) that auto-demotes flagged top-slot stories before persisted homepage ranking.
+- 2026-03-03: Added ingest-time top-story publish gate (`ingest_top_story_gate` events logged every ingest run) that auto-demotes flagged top-slot stories before persisted homepage ranking.
