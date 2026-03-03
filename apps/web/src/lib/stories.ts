@@ -939,15 +939,28 @@ function orderStoriesByStoredRank(stories: StoryRow[]) {
   const withoutRank = stories.filter((story) => !Number.isFinite(story.homepage_rank ?? NaN));
 
   const rankedPinned = withRank.filter((story) => story.status === "pinned");
-  const rankedRest = withRank.filter((story) => story.status !== "pinned");
+  const rankedDemoted = withRank.filter((story) => story.status === "demoted");
+  const rankedRest = withRank.filter(
+    (story) => story.status !== "pinned" && story.status !== "demoted"
+  );
   const fallbackPinned = withoutRank
     .filter((story) => story.status === "pinned")
     .sort((a, b) => b.score - a.score);
+  const fallbackDemoted = withoutRank
+    .filter((story) => story.status === "demoted")
+    .sort((a, b) => b.score - a.score);
   const fallbackRest = withoutRank
-    .filter((story) => story.status !== "pinned")
+    .filter((story) => story.status !== "pinned" && story.status !== "demoted")
     .sort((a, b) => b.score - a.score);
 
-  return [...rankedPinned, ...fallbackPinned, ...rankedRest, ...fallbackRest];
+  return [
+    ...rankedPinned,
+    ...fallbackPinned,
+    ...rankedRest,
+    ...fallbackRest,
+    ...rankedDemoted,
+    ...fallbackDemoted
+  ];
 }
 
 /** Extract JSON from a response that may include markdown fences or preamble. */
@@ -1302,13 +1315,27 @@ export async function getTopStories(
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
   const finalSet = filtered.length > 0 ? filtered : scored;
 
+  const demotedStories = finalSet
+    .filter((story) => story.status === "demoted")
+    .sort((a, b) => b.score - a.score);
+  const withDemotedFallback = (stories: StoryRow[]) => {
+    if (stories.length >= limit || demotedStories.length === 0) {
+      return stories.slice(0, limit);
+    }
+
+    const used = new Set(stories.map((story) => story.id));
+    const fallback = demotedStories.filter((story) => !used.has(story.id));
+    return [...stories, ...fallback].slice(0, limit);
+  };
+
   if (useStoredRank && hasStoredHomepageRank(finalSet)) {
-    const ordered = orderStoriesByStoredRank(finalSet).slice(0, limit);
-    return dedupeStorySummariesForDisplay(ordered);
+    const ordered = orderStoriesByStoredRank(finalSet).filter((story) => story.status !== "demoted");
+    return dedupeStorySummariesForDisplay(withDemotedFallback(ordered));
   }
 
-  const pinned = finalSet.filter((story) => story.status === "pinned");
-  const rest = finalSet.filter((story) => story.status !== "pinned");
+  const rankingPool = finalSet.filter((story) => story.status !== "demoted");
+  const pinned = rankingPool.filter((story) => story.status === "pinned");
+  const rest = rankingPool.filter((story) => story.status !== "pinned");
 
   const deterministicRanked = [
     ...pinned.sort((a, b) => b.score - a.score),
@@ -1324,7 +1351,7 @@ export async function getTopStories(
     : diversityWeighted.slice(0, aiPoolLimit);
   const diversityFiltered = selectDiverseTopStories(ranked, limit);
 
-  const leadAdjusted = chooseLeadStory([...diversityFiltered]);
+  const leadAdjusted = chooseLeadStory([...withDemotedFallback(diversityFiltered)]);
   return dedupeStorySummariesForDisplay(leadAdjusted);
 }
 

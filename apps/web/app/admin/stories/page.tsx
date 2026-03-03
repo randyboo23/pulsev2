@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
 import { getTopStories } from "@/src/lib/stories";
-import { updateStory, mergeStory, hideInternational } from "./actions";
+import { updateStory, mergeStory, hideInternational, demoteStory } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ type StoryAdminRow = {
   summary: string | null;
   editor_title: string | null;
   editor_summary: string | null;
-  status: "active" | "pinned" | "hidden" | null;
+  status: "active" | "pinned" | "demoted" | "hidden" | null;
   last_seen_at: string;
   article_count: number | null;
   source_names: string[] | null;
@@ -95,13 +95,15 @@ export default async function AdminStoriesPage() {
   const stories = result.rows as StoryAdminRow[];
   let topStoryIds: string[] = [];
   try {
-    const topStories = await getTopStories(10);
+    const topStories = await getTopStories(20);
     topStoryIds = topStories.map((story) => story.id);
   } catch (error) {
     console.error(
       `[admin/stories] failed to load top stories: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+  const topStoryPrimaryCount = Math.min(10, topStoryIds.length);
+  const topStoryNextCount = Math.max(0, topStoryIds.length - topStoryPrimaryCount);
   const topStoryOrder = new Map(topStoryIds.map((id, index) => [id, index]));
   const orderedStories = [...stories].sort((a, b) => {
     const aRank = topStoryOrder.has(a.id) ? (topStoryOrder.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
@@ -206,7 +208,8 @@ export default async function AdminStoriesPage() {
           <span className="chip">
             Last cleanup {lastCleanup ? new Date(lastCleanup).toLocaleString("en-US") : "never"}
           </span>
-          <span className="chip">Top stories pinned: {topStoryIds.length}</span>
+          <span className="chip">Homepage Top 10 loaded: {topStoryPrimaryCount}</span>
+          <span className="chip">Next 10 watchlist: {topStoryNextCount}</span>
           {lastCleanupStats ? (
             <span className="chip">
               {lastCleanupStats.deleted_articles ?? 0} articles, {lastCleanupStats.deleted_stories ?? 0} stories removed
@@ -252,7 +255,9 @@ export default async function AdminStoriesPage() {
             return (
               <div className="story" key={story.id}>
                 {topRank !== undefined ? (
-                  <div className="meta">Homepage Top #{topRank + 1}</div>
+                  <div className="meta">
+                    {topRank < 10 ? `Homepage Top #${topRank + 1}` : `Homepage Next #${topRank + 1}`}
+                  </div>
                 ) : null}
                 <div className="meta">
                   Updated {new Date(story.last_seen_at).toLocaleDateString("en-US", {
@@ -297,6 +302,7 @@ export default async function AdminStoriesPage() {
                   >
                     <option value="active">active</option>
                     <option value="pinned">pinned</option>
+                    <option value="demoted">demoted</option>
                     <option value="hidden">hidden</option>
                   </select>
                   <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
@@ -321,6 +327,11 @@ export default async function AdminStoriesPage() {
                 <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
                   <input type="hidden" name="id" value={story.id} />
                   <button className="filter" type="submit">Hide as international</button>
+                </form>
+
+                <form action={demoteStory} className="story-list" style={{ marginTop: "8px" }}>
+                  <input type="hidden" name="id" value={story.id} />
+                  <button className="filter" type="submit">Demote on homepage</button>
                 </form>
 
                 <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>

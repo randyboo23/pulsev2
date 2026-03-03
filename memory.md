@@ -132,3 +132,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added grouping regression fixtures and ingest guardrail alerts (`ingest_guardrail_alert`) with configurable thresholds.
 - 2026-03-03: Added `qa:guardrails` reporting script for quick alert monitoring from `admin_events`.
 - 2026-03-03: `/admin/stories` now pins current homepage top stories to the top of the list and labels each with its homepage rank for faster editorial review.
+- 2026-03-03: Added manual `demoted` story status to push stories out of top homepage slots without fully hiding them; admin stories now surfaces homepage `#1-#20` context (`Top` + `Next` labels) for easier promotion decisions.

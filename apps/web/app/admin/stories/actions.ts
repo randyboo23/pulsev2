@@ -66,3 +66,18 @@ export async function hideInternational(formData: FormData) {
     [id]
   );
 }
+
+export async function demoteStory(formData: FormData) {
+  requireAdmin();
+
+  const id = formData.get("id")?.toString();
+  if (!id) return;
+
+  await pool.query(
+    `update stories
+     set status = 'demoted',
+         updated_at = now()
+     where id = $1`,
+    [id]
+  );
+}
