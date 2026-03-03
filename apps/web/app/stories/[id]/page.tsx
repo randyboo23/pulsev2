@@ -74,6 +74,16 @@ function dedupeArticles(articles: StoryArticleRow[]) {
   });
 }
 
+function getArticleOutletKey(article: StoryArticleRow) {
+  const source = article.source_name?.trim().toLowerCase();
+  if (source) return source;
+  try {
+    return new URL(article.url).hostname.toLowerCase();
+  } catch {
+    return "unknown";
+  }
+}
+
 export default async function StoryPage({
   params
 }: {
@@ -87,6 +97,7 @@ export default async function StoryPage({
 
   const { story, articles: rawArticles } = result;
   const articles = dedupeArticles(rawArticles);
+  const outletCount = new Set(articles.map(getArticleOutletKey)).size;
   const title = story.editor_title ?? story.title;
   const summary =
     story.editor_summary ??
@@ -117,13 +128,16 @@ export default async function StoryPage({
         {/* Meta Bar */}
         <div className="article-meta-bar">
           <span>Last updated {formatDate(story.last_seen_at)}</span>
-          <span>{articles.length} sources</span>
+          <span>
+            {outletCount} {outletCount === 1 ? "outlet" : "outlets"} · {articles.length}{" "}
+            {articles.length === 1 ? "article" : "articles"}
+          </span>
         </div>
 
         {/* Sources Section */}
         <section className="sources-section">
           <h2 className="sources-header">
-            Coverage from {articles.length} {articles.length === 1 ? "Source" : "Sources"}
+            Coverage from {articles.length} {articles.length === 1 ? "Article" : "Articles"}
           </h2>
 
           <div className="story-list">

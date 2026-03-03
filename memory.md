@@ -77,6 +77,7 @@ Last updated: 2026-03-02
 ## Story Detail Page
 - Single-source stories: coverage section shows source name, headline, date, link only (no repeated summary).
 - Multi-source stories: coverage section shows per-article summaries.
+- Story detail meta now distinguishes outlet count vs article count to match homepage outlet semantics.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
@@ -119,3 +120,4 @@ Last updated: 2026-03-02
 - 2026-03-02: Tightened story-merge heuristics to prevent cross-story merges driven by generic overlaps (for example `school` + `lawsuit` without a shared specific entity).
 - 2026-03-02: Tightened top-story event dedupe novelty override and required non-generic overlap for same-event suppression to better balance merge accuracy vs homepage diversity.
 - 2026-03-02: Added top-10 state diversity guardrails in ranking to limit one-state saturation and repeated state+topic clusters.
+- 2026-03-02: Fixed story detail source labeling mismatch by showing both outlet count and article count in metadata.
