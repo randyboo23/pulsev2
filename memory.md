@@ -46,6 +46,7 @@ Last updated: 2026-03-03
 - Ingest response now includes mixed-cluster audit metrics (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - Ingest now emits grouping anomaly alerts (`ingest_guardrail_alert` admin events) when merge/split metrics cross configurable thresholds.
 - Grouping has a fixture-based regression check (`npm run qa:grouping`) covering must-merge and must-not-merge pairs.
+- Added guardrail monitor command (`npm run qa:guardrails`) to inspect recent `ingest_guardrail_alert` events and aggregates.
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -129,3 +130,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Homepage data loading now fails open (all-settled top stories/wire queries + invalid-date guards) so transient backend/data issues render partial content instead of triggering a full page error.
 - 2026-03-03: Added strict merge vetoes for cross-state/entity conflicts and a post-merge auto-split pass for mixed clusters, plus ingest-level mixed-cluster audit metrics.
 - 2026-03-03: Added grouping regression fixtures and ingest guardrail alerts (`ingest_guardrail_alert`) with configurable thresholds.
+- 2026-03-03: Added `qa:guardrails` reporting script for quick alert monitoring from `admin_events`.

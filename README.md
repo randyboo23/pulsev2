@@ -93,6 +93,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
+- Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
 - What it does:
   - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),
   - prints ingest JSON stats,
