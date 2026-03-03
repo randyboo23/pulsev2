@@ -115,6 +115,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `INGEST_ALERT_SPLIT_STORIES` (default `1`)
   - `TOP_STORY_PUBLISH_GATE_LIMIT` (default `10`)
   - `TOP_STORY_PUBLISH_GATE_SCAN_LIMIT` (default `20`)
+  - `TOP_STORY_PUBLISH_GATE_MAX_PASSES` (default `3`)
   - `TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN` (default `2`)
   - `TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN` (default `2`)
   - `TOP_STORY_PUBLISH_GATE_STATE_LIMIT` (default `1`)

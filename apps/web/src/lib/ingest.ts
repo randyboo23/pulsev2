@@ -41,6 +41,7 @@ function envBoundedInt(name: string, fallback: number, min: number, max: number)
 
 const TOP_STORY_PUBLISH_GATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_LIMIT", 10, 5, 20);
 const TOP_STORY_PUBLISH_GATE_SCAN_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_SCAN_LIMIT", 20, 10, 40);
+const TOP_STORY_PUBLISH_GATE_MAX_PASSES = envBoundedInt("TOP_STORY_PUBLISH_GATE_MAX_PASSES", 3, 1, 6);
 const TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN = envBoundedInt(
   "TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN",
   2,
@@ -427,6 +428,10 @@ type TopStoryPublishGateResult = {
   flagged: number;
   demoted: number;
   details: TopStoryPublishGateDetail[];
+};
+
+type TopStoryPublishGatePassResult = TopStoryPublishGateResult & {
+  demotedStoryIds: string[];
 };
 
 type ArticleQualityLabel = "article" | "non_article" | "uncertain";
@@ -2462,7 +2467,7 @@ async function loadFeedRegistry() {
     }));
 }
 
-async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
+async function runTopStoriesPublishGatePass(): Promise<TopStoryPublishGatePassResult> {
   const publishLimit = TOP_STORY_PUBLISH_GATE_LIMIT;
   const scanLimit = Math.max(publishLimit, TOP_STORY_PUBLISH_GATE_SCAN_LIMIT);
   const candidates = await getTopStories(scanLimit, undefined, {
@@ -2474,7 +2479,7 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     .slice(0, publishLimit);
 
   if (gateStories.length === 0) {
-    return { checked: 0, flagged: 0, demoted: 0, details: [] };
+    return { checked: 0, flagged: 0, demoted: 0, details: [], demotedStoryIds: [] };
   }
 
   const storyIds = gateStories.map((story) => story.id);
@@ -2707,6 +2712,7 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
   const idsToDemote = details.map((detail) => detail.storyId);
 
   let demoted = 0;
+  const demotedStoryIds: string[] = [];
   if (idsToDemote.length > 0) {
     const updateResult = await pool.query(
       `update stories
@@ -2718,24 +2724,88 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
       [idsToDemote]
     );
     demoted = updateResult.rows.length;
-
-    if (demoted > 0) {
-      await recordIngestGuardrailAlert({
-        guardrailAlerts: [`top_story_publish_gate_demotions:${demoted}`],
-        topStoryPublishGateChecked: gateStories.length,
-        topStoryPublishGateFlagged: details.length,
-        topStoryPublishGateDemoted: demoted,
-        topStoryPublishGateStoryIds: details.map((detail) => detail.storyId)
-      });
+    for (const row of updateResult.rows) {
+      const id = String((row as { id?: string }).id ?? "").trim();
+      if (id) demotedStoryIds.push(id);
     }
   }
 
-  await recordTopStoryPublishGateEvent({
+  return {
     checked: gateStories.length,
     flagged: details.length,
     demoted,
+    details,
+    demotedStoryIds
+  };
+}
+
+async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
+  const passSummaries: Array<{ pass: number; checked: number; flagged: number; demoted: number }> = [];
+  const detailByStoryId = new Map<string, TopStoryPublishGateDetail>();
+  const demotedStoryIds = new Set<string>();
+  let checked = 0;
+
+  for (let pass = 1; pass <= TOP_STORY_PUBLISH_GATE_MAX_PASSES; pass += 1) {
+    const passResult = await runTopStoriesPublishGatePass();
+    if (pass === 1) {
+      checked = passResult.checked;
+    }
+
+    passSummaries.push({
+      pass,
+      checked: passResult.checked,
+      flagged: passResult.flagged,
+      demoted: passResult.demoted
+    });
+
+    for (const detail of passResult.details) {
+      const existing = detailByStoryId.get(detail.storyId);
+      if (!existing) {
+        detailByStoryId.set(detail.storyId, {
+          ...detail,
+          reasons: [...detail.reasons]
+        });
+        continue;
+      }
+
+      existing.rank = Math.min(existing.rank, detail.rank);
+      existing.state = existing.state ?? detail.state;
+      existing.articleCount = Math.max(existing.articleCount, detail.articleCount);
+      existing.sourceCount = Math.max(existing.sourceCount, detail.sourceCount);
+      existing.recentCount = Math.max(existing.recentCount, detail.recentCount);
+      existing.hoursSinceLatest = Math.max(existing.hoursSinceLatest, detail.hoursSinceLatest);
+      existing.stateMismatchCount = Math.max(existing.stateMismatchCount, detail.stateMismatchCount);
+      existing.entityConflictCount = Math.max(existing.entityConflictCount, detail.entityConflictCount);
+      for (const reason of detail.reasons) {
+        if (!existing.reasons.includes(reason)) {
+          existing.reasons.push(reason);
+        }
+      }
+    }
+
+    for (const storyId of passResult.demotedStoryIds) {
+      demotedStoryIds.add(storyId);
+    }
+
+    if (passResult.demoted === 0) {
+      break;
+    }
+  }
+
+  const details = Array.from(detailByStoryId.values()).sort((a, b) => a.rank - b.rank);
+  const flagged = details.length;
+  const demoted = demotedStoryIds.size;
+  const publishLimit = TOP_STORY_PUBLISH_GATE_LIMIT;
+  const scanLimit = Math.max(publishLimit, TOP_STORY_PUBLISH_GATE_SCAN_LIMIT);
+
+  await recordTopStoryPublishGateEvent({
+    checked,
+    flagged,
+    demoted,
     publishLimit,
     scanLimit,
+    passesRun: passSummaries.length,
+    passSummaries,
     details: details.map((detail) => ({
       storyId: detail.storyId,
       rank: detail.rank,
@@ -2750,9 +2820,20 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     }))
   });
 
+  if (demoted > 0) {
+    await recordIngestGuardrailAlert({
+      guardrailAlerts: [`top_story_publish_gate_demotions:${demoted}`],
+      topStoryPublishGateChecked: checked,
+      topStoryPublishGateFlagged: flagged,
+      topStoryPublishGateDemoted: demoted,
+      topStoryPublishGatePasses: passSummaries,
+      topStoryPublishGateStoryIds: Array.from(demotedStoryIds)
+    });
+  }
+
   return {
-    checked: gateStories.length,
-    flagged: details.length,
+    checked,
+    flagged,
     demoted,
     details
   };

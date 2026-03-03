@@ -55,6 +55,7 @@ Top-Story Publish Gate (ingest.ts) -- audits candidate top slots before persiste
     |                                  flags mixed-state/entity-conflict clusters using merge-veto heuristics
     |                                  enforces state/state+topic saturation caps in the top window
     |                                  applies stale-slot and thin-roundup demotions for low-momentum top stories
+    |                                  re-runs in small iterative passes so replacement stories are also checked
     |                                  auto-demotes flagged non-pinned stories and logs `ingest_top_story_gate` each ingest run
     |
     v
