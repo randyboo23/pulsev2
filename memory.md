@@ -40,6 +40,7 @@ Last updated: 2026-03-02
 - Ingest now runs a liberal multi-pass similar-story merge after lexical grouping to collapse near-duplicate clusters into one story with combined sources.
 - Similar-story merge now requires at least one non-generic shared token for weak overlaps, and blocks high-overlap merges that only share generic/legal-action tokens.
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
+- Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -117,3 +118,4 @@ Last updated: 2026-03-02
 - 2026-03-02: Moved AI homepage reranking from request-time to ingest-time; ingest now stores precomputed order in `stories.homepage_rank` and homepage reads that rank.
 - 2026-03-02: Tightened story-merge heuristics to prevent cross-story merges driven by generic overlaps (for example `school` + `lawsuit` without a shared specific entity).
 - 2026-03-02: Tightened top-story event dedupe novelty override and required non-generic overlap for same-event suppression to better balance merge accuracy vs homepage diversity.
+- 2026-03-02: Added top-10 state diversity guardrails in ranking to limit one-state saturation and repeated state+topic clusters.

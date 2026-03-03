@@ -459,15 +459,100 @@ const STORY_TOPIC_SOFT_PENALTY = 0.8;
 const STORY_TOPIC_STRONG_PENALTY = 0.62;
 const STORY_EVENT_CLUSTER_THRESHOLD = 0.3;
 const TOP_EVENT_CLUSTER_LIMIT = 20;
+const TOP_STATE_DIVERSITY_WINDOW = 10;
+const TOP_STATE_STORY_LIMIT = 2;
+const TOP_STATE_TOPIC_LIMIT = 1;
+
+const STATE_GEO_ALIASES: Record<string, string[]> = {
+  alabama: ["alabama"],
+  alaska: ["alaska"],
+  arizona: ["arizona", "phoenix"],
+  arkansas: ["arkansas"],
+  california: ["california", "los angeles", "lausd", "oakland", "sacramento", "san diego", "san francisco"],
+  colorado: ["colorado", "denver"],
+  connecticut: ["connecticut"],
+  delaware: ["delaware"],
+  florida: ["florida", "miami", "orlando", "tampa"],
+  georgia: ["georgia", "atlanta"],
+  hawaii: ["hawaii"],
+  idaho: ["idaho"],
+  illinois: ["illinois", "chicago", "cps"],
+  indiana: ["indiana", "indianapolis", "indy"],
+  iowa: ["iowa"],
+  kansas: ["kansas"],
+  kentucky: ["kentucky"],
+  louisiana: ["louisiana", "new orleans"],
+  maine: ["maine"],
+  maryland: ["maryland", "baltimore"],
+  massachusetts: ["massachusetts", "boston"],
+  michigan: ["michigan", "detroit"],
+  minnesota: ["minnesota", "minneapolis", "st paul"],
+  mississippi: ["mississippi"],
+  missouri: ["missouri", "st louis", "kansas city"],
+  montana: ["montana"],
+  nebraska: ["nebraska"],
+  nevada: ["nevada", "las vegas"],
+  "new hampshire": ["new hampshire"],
+  "new jersey": ["new jersey", "newark"],
+  "new mexico": ["new mexico"],
+  "new york": ["new york", "new york city", "nyc", "brooklyn", "bronx", "queens"],
+  "north carolina": ["north carolina", "charlotte", "raleigh"],
+  "north dakota": ["north dakota"],
+  ohio: ["ohio", "columbus", "cleveland", "cincinnati"],
+  oklahoma: ["oklahoma"],
+  oregon: ["oregon", "portland"],
+  pennsylvania: ["pennsylvania", "philadelphia", "philly", "pittsburgh"],
+  "rhode island": ["rhode island"],
+  "south carolina": ["south carolina"],
+  "south dakota": ["south dakota"],
+  tennessee: ["tennessee", "memphis", "nashville"],
+  texas: ["texas", "houston", "dallas", "austin", "san antonio"],
+  utah: ["utah"],
+  vermont: ["vermont"],
+  virginia: ["virginia", "richmond"],
+  washington: ["washington state", "seattle"],
+  "west virginia": ["west virginia"],
+  wisconsin: ["wisconsin", "milwaukee"],
+  wyoming: ["wyoming"],
+  "district of columbia": ["district of columbia", "washington dc", "washington d c", "dc"]
+};
+
+const STATE_GEO_ALIAS_INDEX = Object.entries(STATE_GEO_ALIASES).map(([state, aliases]) => ({
+  state,
+  aliases: aliases.map((alias) => normalizeGeoText(alias).trim())
+}));
+
+const GEO_TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
+  {
+    topic: "immigration",
+    pattern: /\b(immigration|immigrant|immigrants|migrant|migrants|ice|deport|deportation|undocumented|enforcement)\b/i
+  },
+  { topic: "closure", pattern: /\b(closure|close|closed|closing|shutdown)\b/i },
+  { topic: "lawsuit", pattern: /\b(lawsuit|sue|sues|sued|suing|court|judge|legal|litigation)\b/i },
+  { topic: "funding", pattern: /\b(funding|budget|deficit|cuts?|tax|taxes|finance|financial)\b/i },
+  { topic: "governance", pattern: /\b(board|vote|voting|election|policy|bill|law|legislation|lawmakers)\b/i },
+  { topic: "safety", pattern: /\b(safety|security|threat|violence|shooting|weapon)\b/i },
+  { topic: "curriculum", pattern: /\b(curriculum|instruction|reading|math|science|assessment|testing)\b/i }
+];
 
 type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
 type StoryTopicTokenCache = Map<string, string[]>;
+type StoryGeoStateCache = Map<string, string | null>;
+type StoryGeoTopicCache = Map<string, string>;
 type StoryTopicOverlapDetails = {
   ratio: number;
   sharedTokens: number;
   sharedActionTokens: number;
   sharedStrongTokens: number;
 };
+
+function normalizeGeoText(text: string) {
+  return ` ${text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+}
 
 function normalizeTopicToken(token: string) {
   let normalized = token.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -624,6 +709,80 @@ function passesTopEventClusterGuard(story: StoryRow, selected: StoryRow[], cache
   return hasStrongNoveltySignal(story, conflict.existing);
 }
 
+function inferStoryState(story: StoryRow, cache: StoryGeoStateCache) {
+  const cached = cache.get(story.id);
+  if (cached !== undefined) return cached;
+
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  if (!title) {
+    cache.set(story.id, null);
+    return null;
+  }
+
+  const normalized = normalizeGeoText(title);
+  for (const entry of STATE_GEO_ALIAS_INDEX) {
+    for (const alias of entry.aliases) {
+      if (alias.length < 2) continue;
+      if (normalized.includes(` ${alias} `)) {
+        cache.set(story.id, entry.state);
+        return entry.state;
+      }
+    }
+  }
+
+  cache.set(story.id, null);
+  return null;
+}
+
+function inferStoryTopicBucket(story: StoryRow, cache: StoryGeoTopicCache) {
+  const cached = cache.get(story.id);
+  if (cached) return cached;
+
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  if (!title) {
+    cache.set(story.id, "general");
+    return "general";
+  }
+
+  const normalized = normalizeGeoText(title);
+  for (const { topic, pattern } of GEO_TOPIC_PATTERNS) {
+    if (pattern.test(normalized)) {
+      cache.set(story.id, topic);
+      return topic;
+    }
+  }
+
+  cache.set(story.id, "general");
+  return "general";
+}
+
+function passesTopStateDiversityGuard(
+  story: StoryRow,
+  selected: StoryRow[],
+  stateCache: StoryGeoStateCache,
+  topicCache: StoryGeoTopicCache
+) {
+  if (selected.length >= TOP_STATE_DIVERSITY_WINDOW) return true;
+  if (story.status === "pinned" || story.lead_urgency_override) return true;
+
+  const state = inferStoryState(story, stateCache);
+  if (!state) return true;
+
+  const windowStories = selected.slice(0, TOP_STATE_DIVERSITY_WINDOW);
+  const sameState = windowStories.filter((candidate) => inferStoryState(candidate, stateCache) === state);
+  if (sameState.length >= TOP_STATE_STORY_LIMIT) return false;
+
+  const topic = inferStoryTopicBucket(story, topicCache);
+  if (topic === "general") return true;
+
+  const sameStateTopicCount = sameState.filter(
+    (candidate) => inferStoryTopicBucket(candidate, topicCache) === topic
+  ).length;
+  if (sameStateTopicCount >= TOP_STATE_TOPIC_LIMIT) return false;
+
+  return true;
+}
+
 function applyTopicSimilarityPenalty(stories: StoryRow[]) {
   if (stories.length <= 1) return stories;
 
@@ -660,6 +819,8 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
   const selected: StoryRow[] = [];
   const selectedIds = new Set<string>();
   const cache: StoryTopicTokenCache = new Map();
+  const stateCache: StoryGeoStateCache = new Map();
+  const topicCache: StoryGeoTopicCache = new Map();
 
   const pinned = stories.filter((story) => story.status === "pinned").sort((a, b) => b.score - a.score);
   for (const story of pinned) {
@@ -672,6 +833,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
 
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
+    if (!passesTopStateDiversityGuard(story, selected, stateCache, topicCache)) continue;
     if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     const overlap = maxStoryTopicOverlap(story, selected, cache);
     if (overlap >= STORY_TOPIC_SIMILARITY_THRESHOLD) continue;
@@ -682,6 +844,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
     if (selectedIds.has(story.id)) continue;
+    if (!passesTopStateDiversityGuard(story, selected, stateCache, topicCache)) continue;
     if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     selected.push(story);
     selectedIds.add(story.id);
