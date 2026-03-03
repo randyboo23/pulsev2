@@ -134,4 +134,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added `qa:guardrails` reporting script for quick alert monitoring from `admin_events`.
 - 2026-03-03: `/admin/stories` now pins current homepage top stories to the top of the list and labels each with its homepage rank for faster editorial review.
 - 2026-03-03: Added manual `demoted` story status to push stories out of top homepage slots without fully hiding them; admin stories now surfaces homepage `#1-#20` context (`Top` + `Next` labels) for easier promotion decisions.
-- 2026-03-03: Added ingest-time top-story publish gate (`ingest_top_story_gate` events logged every ingest run) that auto-demotes flagged top-slot stories before persisted homepage ranking.
+- 2026-03-03: Updated top-story publish gate to evaluate the AI-ranked candidate pool used for persisted homepage order, and lowered stale defaults to 48h (top 3) / 72h (top 10) for faster rotation.

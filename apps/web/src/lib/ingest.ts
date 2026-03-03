@@ -62,13 +62,13 @@ const TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT = envBoundedInt(
 );
 const TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS = envBoundedInt(
   "TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS",
-  72,
+  48,
   24,
   336
 );
 const TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS = envBoundedInt(
   "TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS",
-  120,
+  72,
   48,
   336
 );
@@ -2466,7 +2466,7 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
   const publishLimit = TOP_STORY_PUBLISH_GATE_LIMIT;
   const scanLimit = Math.max(publishLimit, TOP_STORY_PUBLISH_GATE_SCAN_LIMIT);
   const candidates = await getTopStories(scanLimit, undefined, {
-    useAiRerank: false,
+    useAiRerank: true,
     useStoredRank: false
   });
   const gateStories = candidates
