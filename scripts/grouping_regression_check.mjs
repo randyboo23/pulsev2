@@ -66,6 +66,17 @@ const fixtures = [
     right: {
       title: "Texas Board Approves 4,200 Changes to Bible-Infused Curriculum"
     }
+  },
+  {
+    id: "merge_same_event_california_scotus_gender_case",
+    expectMerge: true,
+    left: {
+      title:
+        "Supreme Court Blocks California Law Against Schools Outing Transgender Students to Parents"
+    },
+    right: {
+      title: "Supreme Court Sides with California Parents in Gender Identity Case"
+    }
   }
 ];
 

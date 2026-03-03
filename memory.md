@@ -43,6 +43,7 @@ Last updated: 2026-03-03
 - Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
+- Similar-story merge now normalizes legal ruling language (`blocks/finds/sides/ruled/decision`) into a shared event-action token so same-case court coverage merges more reliably.
 - Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
 - Ingest response now includes mixed-cluster audit metrics (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - Ingest now emits grouping anomaly alerts (`ingest_guardrail_alert` admin events) when merge/split metrics cross configurable thresholds.
@@ -135,3 +136,4 @@ Last updated: 2026-03-03
 - 2026-03-03: `/admin/stories` now pins current homepage top stories to the top of the list and labels each with its homepage rank for faster editorial review.
 - 2026-03-03: Added manual `demoted` story status to push stories out of top homepage slots without fully hiding them; admin stories now surfaces homepage `#1-#20` context (`Top` + `Next` labels) for easier promotion decisions.
 - 2026-03-03: Updated top-story publish gate to evaluate the AI-ranked candidate pool used for persisted homepage order, lowered stale defaults to 48h (top 3) / 72h (top 10), and added iterative re-check passes so bubbled-up replacements are also screened in the same ingest run.
+- 2026-03-03: Expanded merge token canonicalization for legal-ruling phrasing so same Supreme Court case coverage from different outlets collapses into one story more consistently.

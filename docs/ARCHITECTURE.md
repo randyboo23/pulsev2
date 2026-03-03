@@ -37,6 +37,7 @@ Summary Adjudication -- compare candidates (existing / rss / scrape / llm / fall
     v
 Grouping (grouping.ts) -- lexical title-key matching + similar-story merge pass
     |                      merge pass uses event-aware token normalization + overlap and runs multi-pass per ingest
+    |                      legal-ruling phrasing is canonicalized into a shared action token for same-case court coverage
     |                      merge vetoes block cross-state and entity-conflict merges
     |                      post-merge split pass detaches clear mixed-cluster outlier articles
     |                      PLANNED: embedding-based clustering (see docs/embedding-clustering-spec.md)
