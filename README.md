@@ -171,6 +171,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 ## Admin
 - `/admin/stories`: status, merge, cleanup, and brief generation.
   - Homepage context rows are labeled for `Top #1-#10` and `Next #11-#20`.
+  - Guardrails section shows recent `top_story_duplicate_pairs` alerts with one-click merge/demote actions per flagged pair.
   - Use status `pinned` to force priority and `demoted` to push a story out of top homepage slots without hiding it.
 - `/admin/feeds`: feed health and toggles.
 - `/admin/sources`: source weights and tiers.

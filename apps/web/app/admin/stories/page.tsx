@@ -42,6 +42,86 @@ type CleanupEventRow = {
     | null;
 };
 
+type TopStoryDuplicateAuditPair = {
+  leftStoryId: string;
+  rightStoryId: string;
+  leftRank: number;
+  rightRank: number;
+  leftTitle: string;
+  rightTitle: string;
+  ratio: number;
+  sharedTokens: number;
+  sharedActionTokens: number;
+  sharedStrongTokens: number;
+};
+
+type DuplicateGuardrailDetail = {
+  guardrailAlerts?: string[];
+  topStoryDuplicateAuditChecked?: number;
+  topStoryDuplicateAuditThreshold?: number;
+  topStoryDuplicateAuditSimilarity?: number;
+  topStoryDuplicateAuditPairs?: TopStoryDuplicateAuditPair[];
+};
+
+type DuplicateGuardrailEventRow = {
+  created_at: string;
+  detail: DuplicateGuardrailDetail | null;
+};
+
+type DuplicateGuardrailAlert = {
+  createdAt: string;
+  pairCount: number;
+  checked: number;
+  similarity: number;
+  pairs: TopStoryDuplicateAuditPair[];
+};
+
+function parseTopStoryDuplicateAlertCount(alerts: string[] | undefined) {
+  if (!Array.isArray(alerts)) return 0;
+  const duplicateAlert = alerts.find((value) => value.startsWith("top_story_duplicate_pairs:"));
+  if (!duplicateAlert) return 0;
+  const parts = duplicateAlert.split(":");
+  if (parts.length < 2) return 0;
+  const parsed = Number(parts[1]);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
+function toDuplicatePairs(rawPairs: unknown): TopStoryDuplicateAuditPair[] {
+  if (!Array.isArray(rawPairs)) return [];
+
+  return rawPairs
+    .map((pair) => {
+      if (!pair || typeof pair !== "object") return null;
+      const data = pair as Record<string, unknown>;
+      const leftStoryId = String(data.leftStoryId ?? "").trim();
+      const rightStoryId = String(data.rightStoryId ?? "").trim();
+      const leftTitle = String(data.leftTitle ?? "").trim();
+      const rightTitle = String(data.rightTitle ?? "").trim();
+      const leftRank = Number(data.leftRank ?? 0);
+      const rightRank = Number(data.rightRank ?? 0);
+      const ratio = Number(data.ratio ?? 0);
+      const sharedTokens = Number(data.sharedTokens ?? 0);
+      const sharedActionTokens = Number(data.sharedActionTokens ?? 0);
+      const sharedStrongTokens = Number(data.sharedStrongTokens ?? 0);
+      if (!leftStoryId || !rightStoryId || !leftTitle || !rightTitle) return null;
+      if (!Number.isFinite(leftRank) || !Number.isFinite(rightRank)) return null;
+      return {
+        leftStoryId,
+        rightStoryId,
+        leftRank,
+        rightRank,
+        leftTitle,
+        rightTitle,
+        ratio: Number.isFinite(ratio) ? ratio : 0,
+        sharedTokens: Number.isFinite(sharedTokens) ? sharedTokens : 0,
+        sharedActionTokens: Number.isFinite(sharedActionTokens) ? sharedActionTokens : 0,
+        sharedStrongTokens: Number.isFinite(sharedStrongTokens) ? sharedStrongTokens : 0
+      };
+    })
+    .filter((pair): pair is TopStoryDuplicateAuditPair => Boolean(pair));
+}
+
 export default async function AdminStoriesPage() {
   if (!isAdmin()) {
     redirect("/admin/login");
@@ -134,6 +214,36 @@ export default async function AdminStoriesPage() {
     lastCleanup = undefined;
   }
 
+  let duplicateGuardrailAlerts: DuplicateGuardrailAlert[] = [];
+  try {
+    const duplicateResult = await pool.query<DuplicateGuardrailEventRow>(
+      `select created_at, detail
+       from admin_events
+       where event_type = 'ingest_guardrail_alert'
+         and detail::text ilike '%top_story_duplicate_pairs:%'
+       order by created_at desc
+       limit 5`
+    );
+    duplicateGuardrailAlerts = duplicateResult.rows
+      .map((row) => {
+        const detail = row.detail ?? null;
+        if (!detail) return null;
+        const pairs = toDuplicatePairs(detail.topStoryDuplicateAuditPairs);
+        const pairCountFromAlert = parseTopStoryDuplicateAlertCount(detail.guardrailAlerts);
+        const pairCount = pairCountFromAlert > 0 ? pairCountFromAlert : pairs.length;
+        return {
+          createdAt: row.created_at,
+          pairCount,
+          checked: Number(detail.topStoryDuplicateAuditChecked ?? 0),
+          similarity: Number(detail.topStoryDuplicateAuditSimilarity ?? 0),
+          pairs
+        };
+      })
+      .filter((row): row is DuplicateGuardrailAlert => Boolean(row));
+  } catch {
+    duplicateGuardrailAlerts = [];
+  }
+
   const candidates: MergeCandidate[] = [];
   const maxCandidates = 8;
   const windowDays = 4;
@@ -199,6 +309,86 @@ export default async function AdminStoriesPage() {
           <a className="filter" href="/">Home</a>
         </div>
       </header>
+
+      <section className="card">
+        <h2>Guardrails</h2>
+        <p>Recent top-story duplicate alerts from ingest with one-click fixes.</p>
+        {duplicateGuardrailAlerts.length === 0 ? (
+          <div className="meta">No duplicate-pair alerts in the latest ingest runs.</div>
+        ) : (
+          <div className="story-list">
+            {duplicateGuardrailAlerts.map((alert, alertIndex) => (
+              <div className="story" key={`duplicate-alert-${alertIndex}`}>
+                <div className="meta">
+                  {new Date(alert.createdAt).toLocaleString("en-US")} · {alert.pairCount} duplicate pair
+                  {alert.pairCount === 1 ? "" : "s"} in top {alert.checked || 10}
+                </div>
+                <div className="meta">
+                  Similarity threshold {alert.similarity > 0 ? alert.similarity.toFixed(2) : "n/a"}
+                </div>
+                {alert.pairs.length > 0 ? (
+                  <div className="preview-list">
+                    {alert.pairs.map((pair, pairIndex) => {
+                      const targetIsLeft = pair.leftRank <= pair.rightRank;
+                      const targetId = targetIsLeft ? pair.leftStoryId : pair.rightStoryId;
+                      const targetTitle = targetIsLeft ? pair.leftTitle : pair.rightTitle;
+                      const targetRank = targetIsLeft ? pair.leftRank : pair.rightRank;
+                      const sourceId = targetIsLeft ? pair.rightStoryId : pair.leftStoryId;
+                      const sourceTitle = targetIsLeft ? pair.rightTitle : pair.leftTitle;
+                      const sourceRank = targetIsLeft ? pair.rightRank : pair.leftRank;
+
+                      return (
+                        <div className="preview-item" key={`duplicate-pair-${alertIndex}-${pairIndex}`}>
+                          <div>
+                            <strong>
+                              #{pair.leftRank}: {pair.leftTitle}
+                            </strong>
+                            <div className="meta">
+                              <a href={`/stories/${pair.leftStoryId}`} className="admin-link">View left story</a>
+                            </div>
+                            <strong>
+                              #{pair.rightRank}: {pair.rightTitle}
+                            </strong>
+                            <div className="meta">
+                              <a href={`/stories/${pair.rightStoryId}`} className="admin-link">View right story</a>
+                            </div>
+                            <div className="meta">
+                              overlap {Math.round(pair.ratio * 100)}% · shared {pair.sharedTokens} · action {pair.sharedActionTokens} · strong {pair.sharedStrongTokens}
+                            </div>
+                          </div>
+                          <div className="story-list" style={{ minWidth: "220px" }}>
+                            <form action={mergeStory}>
+                              <input type="hidden" name="source_id" value={sourceId} />
+                              <input type="hidden" name="target_id" value={targetId} />
+                              <button className="filter" type="submit">
+                                Merge #{sourceRank} into #{targetRank}
+                              </button>
+                            </form>
+                            <form action={demoteStory}>
+                              <input type="hidden" name="id" value={sourceId} />
+                              <button className="filter" type="submit">
+                                Demote #{sourceRank}
+                              </button>
+                            </form>
+                            <div className="meta">
+                              Recommended target: #{targetRank} {targetTitle}
+                            </div>
+                            <div className="meta">
+                              Source candidate: #{sourceRank} {sourceTitle}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="meta">Alert recorded without pair payload details.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="card">
         <h2>Stories</h2>

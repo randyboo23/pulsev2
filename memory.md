@@ -89,6 +89,9 @@ Last updated: 2026-03-03
 - Multi-source stories: coverage section shows per-article summaries.
 - Story detail meta now shows source/article count first, with outlet count as secondary context.
 
+## Admin Workflow
+- `/admin/stories` now surfaces recent top-story duplicate guardrail alerts with pair-level context and one-click merge/demote actions.
+
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
 - Manual `/admin/stories` backfill is recovery-only, not daily workflow.
@@ -141,3 +144,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Expanded merge token canonicalization for legal-ruling phrasing so same Supreme Court case coverage from different outlets collapses into one story more consistently.
 - 2026-03-03: Added top-story merge-first prepass before publish-gate demotion, scoped to the AI-ranked top candidate set, so same-event duplicates merge before fallback demotions are applied.
 - 2026-03-03: Added automated top-10 duplicate pair audit after rank persistence; ingest now raises guardrail alerts when same-event pairs remain in homepage slots.
+- 2026-03-03: Added an admin guardrails panel for duplicate-pair alerts so editors can immediately merge or demote flagged top-story pairs without manual DB inspection.
