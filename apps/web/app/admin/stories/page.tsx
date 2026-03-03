@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
+import { getTopStories } from "@/src/lib/stories";
 import { updateStory, mergeStory, hideInternational } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +93,22 @@ export default async function AdminStoriesPage() {
     limit 200`
   );
   const stories = result.rows as StoryAdminRow[];
+  let topStoryIds: string[] = [];
+  try {
+    const topStories = await getTopStories(10);
+    topStoryIds = topStories.map((story) => story.id);
+  } catch (error) {
+    console.error(
+      `[admin/stories] failed to load top stories: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const topStoryOrder = new Map(topStoryIds.map((id, index) => [id, index]));
+  const orderedStories = [...stories].sort((a, b) => {
+    const aRank = topStoryOrder.has(a.id) ? (topStoryOrder.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
+    const bRank = topStoryOrder.has(b.id) ? (topStoryOrder.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
+    if (aRank !== bRank) return aRank - bRank;
+    return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
+  });
 
   let lastCleanup: string | undefined;
   let lastCleanupStats: { deleted_articles?: number; deleted_stories?: number } | undefined;
@@ -189,6 +206,7 @@ export default async function AdminStoriesPage() {
           <span className="chip">
             Last cleanup {lastCleanup ? new Date(lastCleanup).toLocaleString("en-US") : "never"}
           </span>
+          <span className="chip">Top stories pinned: {topStoryIds.length}</span>
           {lastCleanupStats ? (
             <span className="chip">
               {lastCleanupStats.deleted_articles ?? 0} articles, {lastCleanupStats.deleted_stories ?? 0} stories removed
@@ -229,96 +247,102 @@ export default async function AdminStoriesPage() {
           </div>
         ) : null}
         <div className="story-list">
-          {stories.map((story) => (
-            <div className="story" key={story.id}>
-              <div className="meta">
-                Updated {new Date(story.last_seen_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric"
-                })}{" "}
-                · {story.article_count ?? 0} sources
-              </div>
-              {story.source_names?.length ? (
+          {orderedStories.map((story) => {
+            const topRank = topStoryOrder.get(story.id);
+            return (
+              <div className="story" key={story.id}>
+                {topRank !== undefined ? (
+                  <div className="meta">Homepage Top #{topRank + 1}</div>
+                ) : null}
                 <div className="meta">
-                  {story.source_names.slice(0, 3).join(", ")}
-                  {story.source_names.length > 3
-                    ? ` +${story.source_names.length - 3} more`
-                    : ""}
+                  Updated {new Date(story.last_seen_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric"
+                  })}{" "}
+                  · {story.article_count ?? 0} sources
                 </div>
-              ) : null}
-              {story.top_articles?.length ? (
-                <div className="preview-list">
-                  {story.top_articles.map((item, index) => (
-                    <div className="preview-item" key={`${story.id}-preview-${index}`}>
-                      <a href={item.url} target="_blank" rel="noreferrer">
-                        {item.title ?? "Untitled"}
-                      </a>
-                      <span>{item.source ?? "Unknown"}</span>
-                    </div>
-                  ))}
+                {story.source_names?.length ? (
+                  <div className="meta">
+                    {story.source_names.slice(0, 3).join(", ")}
+                    {story.source_names.length > 3
+                      ? ` +${story.source_names.length - 3} more`
+                      : ""}
+                  </div>
+                ) : null}
+                {story.top_articles?.length ? (
+                  <div className="preview-list">
+                    {story.top_articles.map((item, index) => (
+                      <div className="preview-item" key={`${story.id}-preview-${index}`}>
+                        <a href={item.url} target="_blank" rel="noreferrer">
+                          {item.title ?? "Untitled"}
+                        </a>
+                        <span>{item.source ?? "Unknown"}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="meta">
+                  <a href={`/stories/${story.id}`} className="admin-link">
+                    View story
+                  </a>
                 </div>
-              ) : null}
-              <div className="meta">
-                <a href={`/stories/${story.id}`} className="admin-link">
-                  View story
-                </a>
+                <form action={updateStory} className="story-list">
+                  <input type="hidden" name="id" value={story.id} />
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Status</label>
+                  <select
+                    name="status"
+                    defaultValue={story.status ?? "active"}
+                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+                  >
+                    <option value="active">active</option>
+                    <option value="pinned">pinned</option>
+                    <option value="hidden">hidden</option>
+                  </select>
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
+                  <input
+                    type="text"
+                    name="editor_title"
+                    defaultValue={story.editor_title ?? ""}
+                    placeholder={story.title}
+                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+                  />
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor summary</label>
+                  <textarea
+                    name="editor_summary"
+                    defaultValue={story.editor_summary ?? ""}
+                    placeholder={story.summary ?? ""}
+                    rows={3}
+                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+                  />
+                  <button className="filter" type="submit">Save</button>
+                </form>
+
+                <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
+                  <input type="hidden" name="id" value={story.id} />
+                  <button className="filter" type="submit">Hide as international</button>
+                </form>
+
+                <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>
+                  <input type="hidden" name="source_id" value={story.id} />
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Merge into</label>
+                  <input
+                    type="text"
+                    name="target_id"
+                    placeholder="Target story id"
+                    list="story-ids"
+                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+                  />
+                  <button className="filter" type="submit">Merge</button>
+                </form>
               </div>
-              <form action={updateStory} className="story-list">
-                <input type="hidden" name="id" value={story.id} />
-                <label style={{ fontSize: "12px", color: "var(--muted)" }}>Status</label>
-                <select
-                  name="status"
-                  defaultValue={story.status ?? "active"}
-                  style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                >
-                  <option value="active">active</option>
-                  <option value="pinned">pinned</option>
-                  <option value="hidden">hidden</option>
-                </select>
-                <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
-                <input
-                  type="text"
-                  name="editor_title"
-                  defaultValue={story.editor_title ?? ""}
-                  placeholder={story.title}
-                  style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                />
-                <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor summary</label>
-                <textarea
-                  name="editor_summary"
-                  defaultValue={story.editor_summary ?? ""}
-                  placeholder={story.summary ?? ""}
-                  rows={3}
-                  style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                />
-                <button className="filter" type="submit">Save</button>
-              </form>
-
-              <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
-                <input type="hidden" name="id" value={story.id} />
-                <button className="filter" type="submit">Hide as international</button>
-              </form>
-
-              <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>
-                <input type="hidden" name="source_id" value={story.id} />
-                <label style={{ fontSize: "12px", color: "var(--muted)" }}>Merge into</label>
-                <input
-                  type="text"
-                  name="target_id"
-                  placeholder="Target story id"
-                  list="story-ids"
-                  style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                />
-                <button className="filter" type="submit">Merge</button>
-              </form>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
       <datalist id="story-ids">
-        {stories.map((story) => (
+        {orderedStories.map((story) => (
           <option key={`story-${story.id}`} value={story.id}>
             {story.title}
           </option>

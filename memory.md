@@ -131,3 +131,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added strict merge vetoes for cross-state/entity conflicts and a post-merge auto-split pass for mixed clusters, plus ingest-level mixed-cluster audit metrics.
 - 2026-03-03: Added grouping regression fixtures and ingest guardrail alerts (`ingest_guardrail_alert`) with configurable thresholds.
 - 2026-03-03: Added `qa:guardrails` reporting script for quick alert monitoring from `admin_events`.
+- 2026-03-03: `/admin/stories` now pins current homepage top stories to the top of the list and labels each with its homepage rank for faster editorial review.
