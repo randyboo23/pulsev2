@@ -1,7 +1,39 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { pool } from "@/src/lib/db";
 import { requireAdmin } from "@/src/lib/admin";
+import { sendSmtpTextEmail } from "@/src/lib/smtp";
+
+const GUARDRAIL_ALERT_EMAIL_SMTP_HOST = String(
+  process.env.GUARDRAIL_ALERT_EMAIL_SMTP_HOST ?? "smtp.gmail.com"
+).trim();
+const GUARDRAIL_ALERT_EMAIL_SMTP_PORT = Number(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_PORT ?? "465");
+const GUARDRAIL_ALERT_EMAIL_SMTP_USER = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_USER ?? "").trim();
+const GUARDRAIL_ALERT_EMAIL_SMTP_PASS = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_PASS ?? "").trim();
+const GUARDRAIL_ALERT_EMAIL_FROM = String(
+  process.env.GUARDRAIL_ALERT_EMAIL_FROM || GUARDRAIL_ALERT_EMAIL_SMTP_USER
+).trim();
+const GUARDRAIL_ALERT_EMAIL_TO = String(process.env.GUARDRAIL_ALERT_EMAIL_TO ?? "")
+  .split(/[;,]/)
+  .map((value) => value.trim())
+  .filter(Boolean);
+const GUARDRAIL_ALERT_EMAIL_EHLO = String(process.env.GUARDRAIL_ALERT_EMAIL_EHLO ?? "pulsek12.com").trim();
+const GUARDRAIL_ALERT_SITE_URL = String(
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulsek12.com"
+).replace(/\/+$/, "");
+
+async function recordGuardrailEmailEvent(detail: Record<string, unknown>) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('ingest_guardrail_email', $1::jsonb)`,
+      [JSON.stringify(detail)]
+    );
+  } catch {
+    // Keep admin action resilient if logging fails.
+  }
+}
 
 export async function updateStory(formData: FormData) {
   requireAdmin();
@@ -80,4 +112,67 @@ export async function demoteStory(formData: FormData) {
      where id = $1`,
     [id]
   );
+}
+
+export async function sendGuardrailTestEmail() {
+  requireAdmin();
+
+  const sentAt = new Date().toISOString();
+  const detailBase = {
+    alertType: "top_story_duplicate_test",
+    to: GUARDRAIL_ALERT_EMAIL_TO,
+    sentAt
+  };
+
+  if (
+    !GUARDRAIL_ALERT_EMAIL_SMTP_HOST ||
+    !Number.isFinite(GUARDRAIL_ALERT_EMAIL_SMTP_PORT) ||
+    GUARDRAIL_ALERT_EMAIL_SMTP_PORT <= 0 ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_USER ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_PASS ||
+    !GUARDRAIL_ALERT_EMAIL_FROM ||
+    GUARDRAIL_ALERT_EMAIL_TO.length === 0
+  ) {
+    await recordGuardrailEmailEvent({
+      ...detailBase,
+      sent: false,
+      error: "missing_smtp_config"
+    });
+    revalidatePath("/admin/stories");
+    return;
+  }
+
+  const subject = "[PulseK12] Guardrail email test";
+  const body = [
+    "This is a test guardrail email from Pulse K-12.",
+    "",
+    `Admin panel: ${GUARDRAIL_ALERT_SITE_URL}/admin/stories`,
+    `Sent at: ${sentAt}`
+  ].join("\n");
+
+  try {
+    await sendSmtpTextEmail({
+      host: GUARDRAIL_ALERT_EMAIL_SMTP_HOST,
+      port: Math.floor(GUARDRAIL_ALERT_EMAIL_SMTP_PORT),
+      username: GUARDRAIL_ALERT_EMAIL_SMTP_USER,
+      password: GUARDRAIL_ALERT_EMAIL_SMTP_PASS,
+      from: GUARDRAIL_ALERT_EMAIL_FROM,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      subject,
+      text: body,
+      ehloHost: GUARDRAIL_ALERT_EMAIL_EHLO
+    });
+    await recordGuardrailEmailEvent({
+      ...detailBase,
+      sent: true
+    });
+  } catch (error) {
+    await recordGuardrailEmailEvent({
+      ...detailBase,
+      sent: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  } finally {
+    revalidatePath("/admin/stories");
+  }
 }

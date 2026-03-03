@@ -2,7 +2,13 @@ import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
 import { getTopStories } from "@/src/lib/stories";
-import { updateStory, mergeStory, hideInternational, demoteStory } from "./actions";
+import {
+  updateStory,
+  mergeStory,
+  hideInternational,
+  demoteStory,
+  sendGuardrailTestEmail
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +82,25 @@ type DuplicateGuardrailAlert = {
   pairs: TopStoryDuplicateAuditPair[];
 };
 
+type GuardrailEmailEventDetail = {
+  alertType?: string;
+  sent?: boolean;
+  to?: unknown;
+  error?: string;
+};
+
+type GuardrailEmailEventRow = {
+  created_at: string;
+  detail: GuardrailEmailEventDetail | null;
+};
+
+type GuardrailTestEmailStatus = {
+  createdAt: string;
+  sent: boolean;
+  recipients: string[];
+  error: string | null;
+};
+
 function parseTopStoryDuplicateAlertCount(alerts: string[] | undefined) {
   if (!Array.isArray(alerts)) return 0;
   const duplicateAlert = alerts.find((value) => value.startsWith("top_story_duplicate_pairs:"));
@@ -120,6 +145,13 @@ function toDuplicatePairs(rawPairs: unknown): TopStoryDuplicateAuditPair[] {
       };
     })
     .filter((pair): pair is TopStoryDuplicateAuditPair => Boolean(pair));
+}
+
+function toStringArray(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value.length > 0);
 }
 
 export default async function AdminStoriesPage() {
@@ -244,6 +276,30 @@ export default async function AdminStoriesPage() {
     duplicateGuardrailAlerts = [];
   }
 
+  let latestGuardrailTestEmail: GuardrailTestEmailStatus | null = null;
+  try {
+    const emailResult = await pool.query<GuardrailEmailEventRow>(
+      `select created_at, detail
+       from admin_events
+       where event_type = 'ingest_guardrail_email'
+         and coalesce(detail->>'alertType', '') = 'top_story_duplicate_test'
+       order by created_at desc
+       limit 1`
+    );
+    const event = emailResult.rows[0];
+    const detail = event?.detail ?? null;
+    if (event && detail) {
+      latestGuardrailTestEmail = {
+        createdAt: event.created_at,
+        sent: detail.sent === true,
+        recipients: toStringArray(detail.to),
+        error: detail.error ? String(detail.error) : null
+      };
+    }
+  } catch {
+    latestGuardrailTestEmail = null;
+  }
+
   const candidates: MergeCandidate[] = [];
   const maxCandidates = 8;
   const windowDays = 4;
@@ -313,6 +369,25 @@ export default async function AdminStoriesPage() {
       <section className="card">
         <h2>Guardrails</h2>
         <p>Recent top-story duplicate alerts from ingest with one-click fixes.</p>
+        <div className="chips" style={{ marginTop: "12px" }}>
+          <form action={sendGuardrailTestEmail}>
+            <button className="chip" type="submit">Send test guardrail email</button>
+          </form>
+          {latestGuardrailTestEmail ? (
+            <span className="chip">
+              Last test {latestGuardrailTestEmail.sent ? "sent" : "failed"}{" "}
+              {new Date(latestGuardrailTestEmail.createdAt).toLocaleString("en-US")}
+              {latestGuardrailTestEmail.recipients.length > 0
+                ? ` · to ${latestGuardrailTestEmail.recipients.join(", ")}`
+                : ""}
+              {!latestGuardrailTestEmail.sent && latestGuardrailTestEmail.error
+                ? ` · ${latestGuardrailTestEmail.error.slice(0, 120)}`
+                : ""}
+            </span>
+          ) : (
+            <span className="chip">No test email run yet</span>
+          )}
+        </div>
         {duplicateGuardrailAlerts.length === 0 ? (
           <div className="meta">No duplicate-pair alerts in the latest ingest runs.</div>
         ) : (

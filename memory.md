@@ -92,6 +92,7 @@ Last updated: 2026-03-03
 
 ## Admin Workflow
 - `/admin/stories` now surfaces recent top-story duplicate guardrail alerts with pair-level context and one-click merge/demote actions.
+- `/admin/stories` includes a "Send test guardrail email" action and shows last test status (sent/failed) so SMTP can be verified on demand.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
@@ -147,3 +148,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added automated top-10 duplicate pair audit after rank persistence; ingest now raises guardrail alerts when same-event pairs remain in homepage slots.
 - 2026-03-03: Added an admin guardrails panel for duplicate-pair alerts so editors can immediately merge or demote flagged top-story pairs without manual DB inspection.
 - 2026-03-03: Added optional SMTP notifications for duplicate top-story guardrail alerts (`top_story_duplicate_pairs`) with cooldown and fingerprint dedupe; ingest fails open if email sending fails.
+- 2026-03-03: Added an admin one-click SMTP test email action and last-test status display on `/admin/stories` to validate guardrail email configuration.
