@@ -44,6 +44,7 @@ Last updated: 2026-03-03
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
 - Ingest now runs a post-rank top-story duplicate audit (top 10) and emits `top_story_duplicate_pairs:N` guardrail alerts when same-event pairs still appear.
+- Duplicate top-story guardrail alerts can optionally send SMTP emails (Gmail supported) with cooldown + same-pair dedupe so editors only get actionable notifications.
 - Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
 - Similar-story merge now normalizes legal ruling language (`blocks/finds/sides/ruled/decision`) into a shared event-action token so same-case court coverage merges more reliably.
 - Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
@@ -145,3 +146,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added top-story merge-first prepass before publish-gate demotion, scoped to the AI-ranked top candidate set, so same-event duplicates merge before fallback demotions are applied.
 - 2026-03-03: Added automated top-10 duplicate pair audit after rank persistence; ingest now raises guardrail alerts when same-event pairs remain in homepage slots.
 - 2026-03-03: Added an admin guardrails panel for duplicate-pair alerts so editors can immediately merge or demote flagged top-story pairs without manual DB inspection.
+- 2026-03-03: Added optional SMTP notifications for duplicate top-story guardrail alerts (`top_story_duplicate_pairs`) with cooldown and fingerprint dedupe; ingest fails open if email sending fails.

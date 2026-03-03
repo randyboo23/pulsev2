@@ -14,6 +14,7 @@ import {
   inferGeoTopicFromTitle,
   refreshHomepageRanks
 } from "./stories";
+import { sendSmtpTextEmail } from "./smtp";
 
 const parser = new Parser({
   timeout: 10000,
@@ -118,6 +119,34 @@ const TOP_STORY_DUPLICATE_AUDIT_SIMILARITY = envBoundedFloat(
   0.45,
   0.8
 );
+const GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES = envBoundedInt(
+  "GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES",
+  60,
+  5,
+  1_440
+);
+const GUARDRAIL_ALERT_EMAIL_SMTP_HOST = String(
+  process.env.GUARDRAIL_ALERT_EMAIL_SMTP_HOST ?? "smtp.gmail.com"
+).trim();
+const GUARDRAIL_ALERT_EMAIL_SMTP_PORT = envBoundedInt(
+  "GUARDRAIL_ALERT_EMAIL_SMTP_PORT",
+  465,
+  1,
+  65_535
+);
+const GUARDRAIL_ALERT_EMAIL_SMTP_USER = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_USER ?? "").trim();
+const GUARDRAIL_ALERT_EMAIL_SMTP_PASS = String(process.env.GUARDRAIL_ALERT_EMAIL_SMTP_PASS ?? "").trim();
+const GUARDRAIL_ALERT_EMAIL_TO = String(process.env.GUARDRAIL_ALERT_EMAIL_TO ?? "")
+  .split(/[;,]/)
+  .map((value) => value.trim())
+  .filter(Boolean);
+const GUARDRAIL_ALERT_EMAIL_FROM = String(
+  process.env.GUARDRAIL_ALERT_EMAIL_FROM || GUARDRAIL_ALERT_EMAIL_SMTP_USER
+).trim();
+const GUARDRAIL_ALERT_EMAIL_EHLO = String(process.env.GUARDRAIL_ALERT_EMAIL_EHLO ?? "pulsek12.com").trim();
+const GUARDRAIL_ALERT_SITE_URL = String(
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulsek12.com"
+).replace(/\/+$/, "");
 
 const TOP_SLOT_ROUNDUP_PATTERNS = [
   /\bnumber of the week\b/i,
@@ -227,6 +256,20 @@ async function recordIngestGuardrailAlert(detail: Record<string, unknown>) {
   } catch (error) {
     console.error(
       `[ingest] failed to record guardrail alert event: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+async function recordGuardrailEmailEvent(detail: Record<string, unknown>) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('ingest_guardrail_email', $1::jsonb)`,
+      [JSON.stringify(detail)]
+    );
+  } catch (error) {
+    console.error(
+      `[ingest] failed to record guardrail email event: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
@@ -2967,6 +3010,139 @@ type TopStoryDuplicatePair = {
   sharedStrongTokens: number;
 };
 
+type GuardrailEmailEventDetail = {
+  alertType?: string;
+  sent?: boolean;
+  fingerprint?: string;
+};
+
+type GuardrailEmailEventRow = {
+  created_at: string;
+  detail: GuardrailEmailEventDetail | null;
+};
+
+function duplicatePairFingerprint(pairs: TopStoryDuplicatePair[]) {
+  return pairs
+    .map((pair) => [pair.leftStoryId, pair.rightStoryId].sort().join(":"))
+    .sort()
+    .join("|");
+}
+
+function formatDuplicatePairLine(index: number, pair: TopStoryDuplicatePair) {
+  return [
+    `${index + 1}) #${pair.leftRank}: ${pair.leftTitle}`,
+    `   #${pair.rightRank}: ${pair.rightTitle}`,
+    `   overlap=${Math.round(pair.ratio * 100)}% shared=${pair.sharedTokens} action=${pair.sharedActionTokens} strong=${pair.sharedStrongTokens}`,
+    `   stories: ${GUARDRAIL_ALERT_SITE_URL}/stories/${pair.leftStoryId} | ${GUARDRAIL_ALERT_SITE_URL}/stories/${pair.rightStoryId}`
+  ].join("\n");
+}
+
+async function maybeSendTopStoryDuplicateEmail(params: {
+  checked: number;
+  threshold: number;
+  similarity: number;
+  pairs: TopStoryDuplicatePair[];
+}) {
+  if (params.pairs.length === 0) return;
+  if (
+    !GUARDRAIL_ALERT_EMAIL_SMTP_HOST ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_USER ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_PASS ||
+    !GUARDRAIL_ALERT_EMAIL_FROM ||
+    GUARDRAIL_ALERT_EMAIL_TO.length === 0
+  ) {
+    return;
+  }
+
+  const fingerprint = duplicatePairFingerprint(params.pairs);
+  const cooldownMs = GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES * 60 * 1000;
+
+  let shouldSend = true;
+  try {
+    const latestEvent = await pool.query<GuardrailEmailEventRow>(
+      `select created_at, detail
+       from admin_events
+       where event_type = 'ingest_guardrail_email'
+         and coalesce(detail->>'alertType', '') = 'top_story_duplicate_pairs'
+         and coalesce((detail->>'sent')::boolean, false) = true
+       order by created_at desc
+       limit 1`
+    );
+    const previous = latestEvent.rows[0];
+    if (previous) {
+      const previousFingerprint = String(previous.detail?.fingerprint ?? "");
+      const previousTime = new Date(previous.created_at).getTime();
+      const now = Date.now();
+      if (
+        previousFingerprint === fingerprint &&
+        Number.isFinite(previousTime) &&
+        now - previousTime < cooldownMs
+      ) {
+        shouldSend = false;
+      }
+    }
+  } catch (error) {
+    console.error(
+      `[ingest] failed to load previous guardrail email events: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (!shouldSend) return;
+
+  const subject = `[PulseK12] Top story duplicates detected (${params.pairs.length})`;
+  const body = [
+    `Pulse guardrail alert: ${params.pairs.length} duplicate top-story pair(s) detected.`,
+    `Checked top stories: ${params.checked}`,
+    `Duplicate threshold: ${params.threshold}`,
+    `Similarity threshold: ${params.similarity.toFixed(2)}`,
+    "",
+    "Pairs:",
+    ...params.pairs.map((pair, index) => formatDuplicatePairLine(index, pair)),
+    "",
+    `Review in admin: ${GUARDRAIL_ALERT_SITE_URL}/admin/stories`,
+    `Detected at: ${new Date().toISOString()}`
+  ].join("\n");
+
+  try {
+    await sendSmtpTextEmail({
+      host: GUARDRAIL_ALERT_EMAIL_SMTP_HOST,
+      port: GUARDRAIL_ALERT_EMAIL_SMTP_PORT,
+      username: GUARDRAIL_ALERT_EMAIL_SMTP_USER,
+      password: GUARDRAIL_ALERT_EMAIL_SMTP_PASS,
+      from: GUARDRAIL_ALERT_EMAIL_FROM,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      subject,
+      text: body,
+      ehloHost: GUARDRAIL_ALERT_EMAIL_EHLO
+    });
+    await recordGuardrailEmailEvent({
+      alertType: "top_story_duplicate_pairs",
+      sent: true,
+      fingerprint,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      pairCount: params.pairs.length,
+      checked: params.checked,
+      threshold: params.threshold,
+      similarity: params.similarity
+    });
+  } catch (error) {
+    console.error(
+      `[ingest] failed to send duplicate guardrail email: ${error instanceof Error ? error.message : String(error)}`
+    );
+    await recordGuardrailEmailEvent({
+      alertType: "top_story_duplicate_pairs",
+      sent: false,
+      fingerprint,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      pairCount: params.pairs.length,
+      checked: params.checked,
+      threshold: params.threshold,
+      similarity: params.similarity,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 async function auditTopStoryDuplicatePairs() {
   const candidates = await getTopStories(TOP_STORY_DUPLICATE_AUDIT_LIMIT, undefined, {
     useAiRerank: false,
@@ -3380,12 +3556,19 @@ export async function ingestFeeds(): Promise<IngestResult> {
     Number.isFinite(INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS) &&
     topStoryDuplicatePairs >= INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS;
   if (shouldAlertOnTopStoryDuplicates) {
-    await recordIngestGuardrailAlert({
+    const duplicateAlertDetail = {
       guardrailAlerts: [`top_story_duplicate_pairs:${topStoryDuplicatePairs}`],
       topStoryDuplicateAuditChecked: topStoryDuplicateAudit.checked,
       topStoryDuplicateAuditThreshold: INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS,
       topStoryDuplicateAuditSimilarity: TOP_STORY_DUPLICATE_AUDIT_SIMILARITY,
       topStoryDuplicateAuditPairs: topStoryDuplicateAudit.duplicatePairs
+    };
+    await recordIngestGuardrailAlert(duplicateAlertDetail);
+    await maybeSendTopStoryDuplicateEmail({
+      checked: topStoryDuplicateAudit.checked,
+      threshold: INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS,
+      similarity: TOP_STORY_DUPLICATE_AUDIT_SIMILARITY,
+      pairs: topStoryDuplicateAudit.duplicatePairs
     });
   }
 

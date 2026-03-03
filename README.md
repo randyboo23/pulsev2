@@ -40,6 +40,7 @@ Techmeme for US K-12 education news.
 - Top-story publish gate runs before rank persistence to auto-demote suspect top slots (mixed-state/entity-conflict clusters and state/topic saturation spillover).
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool so same-event duplicates are merged before any top-slot demotion fallback.
 - Ingest now audits persisted top-10 stories for same-event duplicate pairs and emits a guardrail alert when any remain after merge/publish-gate passes.
+- Optional: duplicate-pair guardrail alerts can send email via SMTP (Gmail supported) when top-story duplicates remain.
 - Automatic homepage-rank refresh on ingest (`refreshHomepageRanks`) so homepage order is precomputed in DB.
 - Story grouping by title key, plus automatic similar-story merge pass during ingest.
 - Story-merge guardrails now hard-veto cross-state/entity-conflict merges and run a post-merge outlier split pass for mixed clusters.
@@ -132,6 +133,14 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `TOP_STORY_PREMERGE_SIMILARITY` (default `0.54`)
   - `TOP_STORY_DUPLICATE_AUDIT_LIMIT` (default `10`)
   - `TOP_STORY_DUPLICATE_AUDIT_SIMILARITY` (default `0.54`)
+  - `GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES` (default `60`, skips repeated same-pair alerts within cooldown)
+  - `GUARDRAIL_ALERT_EMAIL_SMTP_HOST` (default `smtp.gmail.com`)
+  - `GUARDRAIL_ALERT_EMAIL_SMTP_PORT` (default `465`)
+  - `GUARDRAIL_ALERT_EMAIL_SMTP_USER` (required to send email)
+  - `GUARDRAIL_ALERT_EMAIL_SMTP_PASS` (required to send email; use Gmail App Password)
+  - `GUARDRAIL_ALERT_EMAIL_FROM` (default SMTP user)
+  - `GUARDRAIL_ALERT_EMAIL_TO` (comma-separated recipients; required to send email)
+  - `GUARDRAIL_ALERT_EMAIL_EHLO` (default `pulsek12.com`)
 
 ## One-Time Story Backfill Merge
 - Run from repo root to merge existing duplicate story clusters:
