@@ -101,6 +101,27 @@ const EVENT_ACTION_TOKENS = new Set([
   "leave"
 ]);
 
+const GENERIC_CONTEXT_TOKENS = new Set([
+  "school",
+  "district",
+  "student",
+  "teacher",
+  "parent",
+  "public",
+  "charter",
+  "education",
+  "policy",
+  "state",
+  "board",
+  "law",
+  "bill",
+  "legislation",
+  "program",
+  "plan",
+  "system",
+  "official"
+]);
+
 const MERGE_EVENT_CLUSTER_THRESHOLD = 0.3;
 
 type MergeCandidateStory = {
@@ -133,6 +154,7 @@ type MergeOverlapDetails = {
   ratio: number;
   sharedTokens: number;
   sharedActionTokens: number;
+  sharedStrongTokens: number;
 };
 
 function normalizeTitle(title: string) {
@@ -210,33 +232,41 @@ function mergeOverlapDetails(a: MergeCandidateStory, b: MergeCandidateStory, cac
   const tokensA = getTokens(a);
   const tokensB = getTokens(b);
   if (tokensA.length === 0 || tokensB.length === 0) {
-    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0 };
+    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0, sharedStrongTokens: 0 };
   }
 
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
   let sharedTokens = 0;
   let sharedActionTokens = 0;
+  let sharedStrongTokens = 0;
   for (const token of setA) {
     if (setB.has(token)) {
       sharedTokens += 1;
       if (EVENT_ACTION_TOKENS.has(token)) sharedActionTokens += 1;
+      if (!EVENT_ACTION_TOKENS.has(token) && !GENERIC_CONTEXT_TOKENS.has(token)) {
+        sharedStrongTokens += 1;
+      }
     }
   }
 
   return {
     ratio: sharedTokens / Math.max(1, Math.min(setA.size, setB.size)),
     sharedTokens,
-    sharedActionTokens
+    sharedActionTokens,
+    sharedStrongTokens
   };
 }
 
 function shouldMergeStories(details: MergeOverlapDetails, similarityThreshold: number) {
-  if (details.ratio >= similarityThreshold) return true;
+  if (details.ratio >= similarityThreshold) {
+    return details.sharedStrongTokens >= 1 || details.sharedActionTokens >= 2;
+  }
   return (
     details.ratio >= MERGE_EVENT_CLUSTER_THRESHOLD &&
-    details.sharedTokens >= 2 &&
-    details.sharedActionTokens >= 1
+    details.sharedTokens >= 3 &&
+    details.sharedActionTokens >= 1 &&
+    details.sharedStrongTokens >= 1
   );
 }
 

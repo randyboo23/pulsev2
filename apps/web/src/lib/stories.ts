@@ -415,6 +415,27 @@ const EVENT_ACTION_TOKENS = new Set([
   "leave"
 ]);
 
+const TOPIC_GENERIC_CONTEXT_TOKENS = new Set([
+  "school",
+  "district",
+  "student",
+  "teacher",
+  "parent",
+  "public",
+  "charter",
+  "education",
+  "policy",
+  "state",
+  "board",
+  "law",
+  "bill",
+  "legislation",
+  "program",
+  "plan",
+  "system",
+  "official"
+]);
+
 const NOVELTY_HINTS = [
   "new details",
   "developing",
@@ -445,6 +466,7 @@ type StoryTopicOverlapDetails = {
   ratio: number;
   sharedTokens: number;
   sharedActionTokens: number;
+  sharedStrongTokens: number;
 };
 
 function normalizeTopicToken(token: string) {
@@ -513,24 +535,29 @@ function storyTopicOverlapDetails(a: StoryTopicCandidate, b: StoryTopicCandidate
   const tokensA = getStoryTopicTokens(a, cache);
   const tokensB = getStoryTopicTokens(b, cache);
   if (tokensA.length === 0 || tokensB.length === 0) {
-    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0 };
+    return { ratio: 0, sharedTokens: 0, sharedActionTokens: 0, sharedStrongTokens: 0 };
   }
 
   const setA = new Set(tokensA);
   const setB = new Set(tokensB);
   let sharedTokens = 0;
   let sharedActionTokens = 0;
+  let sharedStrongTokens = 0;
   for (const token of setA) {
     if (setB.has(token)) {
       sharedTokens += 1;
       if (EVENT_ACTION_TOKENS.has(token)) sharedActionTokens += 1;
+      if (!EVENT_ACTION_TOKENS.has(token) && !TOPIC_GENERIC_CONTEXT_TOKENS.has(token)) {
+        sharedStrongTokens += 1;
+      }
     }
   }
 
   return {
     ratio: sharedTokens / Math.max(1, Math.min(setA.size, setB.size)),
     sharedTokens,
-    sharedActionTokens
+    sharedActionTokens,
+    sharedStrongTokens
   };
 }
 
@@ -548,11 +575,14 @@ function maxStoryTopicOverlap(story: StoryTopicCandidate, others: StoryTopicCand
 }
 
 function isSameEventCluster(details: StoryTopicOverlapDetails) {
-  if (details.ratio >= STORY_TOPIC_SIMILARITY_THRESHOLD) return true;
+  if (details.ratio >= STORY_TOPIC_SIMILARITY_THRESHOLD) {
+    return details.sharedStrongTokens >= 1 || details.sharedActionTokens >= 2;
+  }
   return (
     details.ratio >= STORY_EVENT_CLUSTER_THRESHOLD &&
-    details.sharedTokens >= 2 &&
-    details.sharedActionTokens >= 1
+    details.sharedTokens >= 3 &&
+    details.sharedActionTokens >= 1 &&
+    details.sharedStrongTokens >= 1
   );
 }
 
@@ -567,8 +597,8 @@ function hasStrongNoveltySignal(candidate: StoryRow, existing: StoryRow) {
   const sourceDelta = Number(candidate.source_count) - Number(existing.source_count);
   const recentDelta = Number(candidate.recent_count) - Number(existing.recent_count);
 
-  if (newerByHours >= 12 && sourceDelta >= 2) return true;
-  if (noveltyHint && newerByHours >= 8 && (sourceDelta >= 1 || recentDelta >= 1)) return true;
+  if (noveltyHint && newerByHours >= 6 && (sourceDelta >= 1 || recentDelta >= 2)) return true;
+  if (newerByHours >= 24 && sourceDelta >= 4 && recentDelta >= 2) return true;
 
   return false;
 }

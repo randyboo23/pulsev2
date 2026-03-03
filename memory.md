@@ -38,6 +38,8 @@ Last updated: 2026-03-02
 - Topic diversity now uses alias-aware tokens (`LAUSD` -> `Los Angeles Unified...`) and broader generic-word stopwords so same-event variants are suppressed more reliably in top slots.
 - Top 20 now applies an event-cluster cap (default one story per event) with a strict novelty override for true follow-up developments.
 - Ingest now runs a liberal multi-pass similar-story merge after lexical grouping to collapse near-duplicate clusters into one story with combined sources.
+- Similar-story merge now requires at least one non-generic shared token for weak overlaps, and blocks high-overlap merges that only share generic/legal-action tokens.
+- Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - `story_type` emitted as `breaking | policy | feature | evergreen | opinion`.
 - Lead eligibility is explicit (`lead_eligible`, `lead_reason`).
 - Penalty values (tuned 2026-02-06):
@@ -113,3 +115,5 @@ Last updated: 2026-03-02
 - 2026-03-02: Newsletter subscribe success copy updated to "You're in! Pulse K-12 hits your inbox every Sunday."
 - 2026-03-02: Homepage now fetches top stories and wire articles in parallel (`Promise.all`) to remove serial request latency.
 - 2026-03-02: Moved AI homepage reranking from request-time to ingest-time; ingest now stores precomputed order in `stories.homepage_rank` and homepage reads that rank.
+- 2026-03-02: Tightened story-merge heuristics to prevent cross-story merges driven by generic overlaps (for example `school` + `lawsuit` without a shared specific entity).
+- 2026-03-02: Tightened top-story event dedupe novelty override and required non-generic overlap for same-event suppression to better balance merge accuracy vs homepage diversity.
