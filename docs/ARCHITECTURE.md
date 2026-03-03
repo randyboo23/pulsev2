@@ -168,4 +168,4 @@ scripts/
 ## Known Limits
 - Grouping starts lexical (`story_key`) and then does a token-overlap merge pass with state/entity vetoes plus mixed-cluster outlier splits; semantic edge cases still remain until embedding clustering lands.
 - Worker orchestration (`apps/worker`) is not yet the runtime execution path.
-- No fixture-based regression suite yet for clustering/summary/ranking.
+- No comprehensive fixture-based regression suite yet for summary/ranking (grouping has a focused fixture regression check).

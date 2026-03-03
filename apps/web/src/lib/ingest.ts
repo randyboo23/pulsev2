@@ -18,8 +18,47 @@ let firecrawlBackoffUntil = 0;
 const FIRECRAWL_BACKOFF_MS = 15 * 60 * 1000;
 const FIRECRAWL_DAILY_BUDGET = Number(process.env.FIRECRAWL_DAILY_BUDGET ?? "90");
 const FIRECRAWL_PRIORITY_STORY_LIMIT = Number(process.env.FIRECRAWL_PRIORITY_STORY_LIMIT ?? "12");
+const INGEST_ALERT_MERGED_STORIES = Number(process.env.INGEST_ALERT_MERGED_STORIES ?? "25");
+const INGEST_ALERT_MERGE_TO_GROUPED_RATIO = Number(process.env.INGEST_ALERT_MERGE_TO_GROUPED_RATIO ?? "0.65");
+const INGEST_ALERT_MIXED_OUTLIERS = Number(process.env.INGEST_ALERT_MIXED_OUTLIERS ?? "1");
+const INGEST_ALERT_SPLIT_STORIES = Number(process.env.INGEST_ALERT_SPLIT_STORIES ?? "1");
 
 let lastFirecrawlBudgetWarningDay = "";
+
+type IngestGroupingGuardrailMetrics = {
+  grouped: number;
+  mergedStories: number;
+  mixedStoryOutliers: number;
+  mixedStoriesSplit: number;
+};
+
+function groupingGuardrailAlerts(metrics: IngestGroupingGuardrailMetrics) {
+  const alerts: string[] = [];
+  const groupedDenominator = Math.max(1, metrics.grouped);
+  const mergeToGroupedRatio = metrics.mergedStories / groupedDenominator;
+
+  if (Number.isFinite(INGEST_ALERT_MERGED_STORIES) && metrics.mergedStories >= INGEST_ALERT_MERGED_STORIES) {
+    alerts.push(`high_merge_count:${metrics.mergedStories}`);
+  }
+
+  if (
+    Number.isFinite(INGEST_ALERT_MERGE_TO_GROUPED_RATIO) &&
+    metrics.grouped >= 5 &&
+    mergeToGroupedRatio >= INGEST_ALERT_MERGE_TO_GROUPED_RATIO
+  ) {
+    alerts.push(`high_merge_ratio:${mergeToGroupedRatio.toFixed(2)}`);
+  }
+
+  if (Number.isFinite(INGEST_ALERT_MIXED_OUTLIERS) && metrics.mixedStoryOutliers >= INGEST_ALERT_MIXED_OUTLIERS) {
+    alerts.push(`mixed_outliers:${metrics.mixedStoryOutliers}`);
+  }
+
+  if (Number.isFinite(INGEST_ALERT_SPLIT_STORIES) && metrics.mixedStoriesSplit >= INGEST_ALERT_SPLIT_STORIES) {
+    alerts.push(`mixed_splits:${metrics.mixedStoriesSplit}`);
+  }
+
+  return alerts;
+}
 
 function isFirecrawlBackoffActive() {
   return firecrawlBackoffUntil > Date.now();
@@ -72,6 +111,20 @@ async function recordFirecrawlUsage() {
     `insert into admin_events (event_type, detail)
      values ('firecrawl_usage', jsonb_build_object('calls', 1))`
   );
+}
+
+async function recordIngestGuardrailAlert(detail: Record<string, unknown>) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('ingest_guardrail_alert', $1::jsonb)`,
+      [JSON.stringify(detail)]
+    );
+  } catch (error) {
+    console.error(
+      `[ingest] failed to record guardrail alert event: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 async function parseFeedViaHttp(feedUrl: string) {
@@ -263,6 +316,7 @@ type IngestResult = {
   mixedStoryCandidates: number;
   mixedStoryOutliers: number;
   mixedStoriesSplit: number;
+  guardrailAlerts: string[];
   parseFailures: number;
   qualityChecked: number;
   nonArticleBlocked: number;
@@ -2640,6 +2694,24 @@ export async function ingestFeeds(): Promise<IngestResult> {
     candidateLimit: 220,
     maxSplits: 24
   });
+  const guardrailAlerts = groupingGuardrailAlerts({
+    grouped,
+    mergedStories,
+    mixedStoryOutliers: splitPass.flagged,
+    mixedStoriesSplit: splitPass.split
+  });
+  if (guardrailAlerts.length > 0) {
+    const detail = {
+      guardrailAlerts,
+      grouped,
+      mergedStories,
+      mixedStoryCandidates: splitPass.candidates,
+      mixedStoryOutliers: splitPass.flagged,
+      mixedStoriesSplit: splitPass.split
+    };
+    console.warn(`[ingest] grouping guardrail alerts: ${guardrailAlerts.join(", ")}`);
+    await recordIngestGuardrailAlert(detail);
+  }
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
   const rankRefresh = await refreshHomepageRanks(60);
 
@@ -2655,6 +2727,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     mixedStoryCandidates: splitPass.candidates,
     mixedStoryOutliers: splitPass.flagged,
     mixedStoriesSplit: splitPass.split,
+    guardrailAlerts,
     parseFailures,
     qualityChecked: qualityScan.qualityChecked,
     nonArticleBlocked,

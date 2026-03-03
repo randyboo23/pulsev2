@@ -10,6 +10,7 @@
     "dev:worker": "npm --workspace apps/worker run dev",
     "lint": "npm --workspace apps/web run lint",
     "db:setup": "psql -f db/schema.sql",
-    "qa:summaries": "bash scripts/qa-summaries.sh"
+    "qa:summaries": "bash scripts/qa-summaries.sh",
+    "qa:grouping": "node --conditions react-server --import tsx/esm scripts/grouping_regression_check.mjs"
   }
 }

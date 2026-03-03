@@ -265,11 +265,28 @@ export type MergeSimilarStoriesOptions = {
   dryRun?: boolean;
 };
 
+export type MergeDecisionInput = {
+  id?: string;
+  story_key?: string | null;
+  title: string;
+  editor_title?: string | null;
+  editor_summary?: string | null;
+  status?: string | null;
+  last_seen_at?: string;
+  article_count?: number;
+};
+
 export type MergeSimilarStoriesResult = {
   candidates: number;
   evaluatedPairs: number;
   suggested: number;
   merged: number;
+};
+
+export type MergeDecisionResult = {
+  shouldMerge: boolean;
+  details: MergeOverlapDetails;
+  vetoReason: "state_mismatch" | "entity_conflict" | null;
 };
 
 export type SplitMixedStoriesOptions = {
@@ -285,7 +302,7 @@ export type SplitMixedStoriesResult = {
   split: number;
 };
 
-type MergeOverlapDetails = {
+export type MergeOverlapDetails = {
   ratio: number;
   sharedTokens: number;
   sharedActionTokens: number;
@@ -471,18 +488,17 @@ function mergeOverlapDetails(a: MergeCandidateStory, b: MergeCandidateStory, cac
   };
 }
 
-function shouldMergeStories(
+function mergeVetoReason(
   a: MergeCandidateStory,
   b: MergeCandidateStory,
   details: MergeOverlapDetails,
-  similarityThreshold: number,
   stateCache: StoryStateCache,
   entityTokenCache: StoryEntityTokenCache
 ) {
   const stateA = inferStoryState(a, stateCache);
   const stateB = inferStoryState(b, stateCache);
   if (stateA && stateB && stateA !== stateB) {
-    return false;
+    return "state_mismatch" as const;
   }
 
   const entityA = getStoryEntityTokens(a, entityTokenCache);
@@ -495,6 +511,21 @@ function shouldMergeStories(
     details.sharedStrongTokens === 0 &&
     details.sharedActionTokens >= 1
   ) {
+    return "entity_conflict" as const;
+  }
+
+  return null;
+}
+
+function shouldMergeStories(
+  a: MergeCandidateStory,
+  b: MergeCandidateStory,
+  details: MergeOverlapDetails,
+  similarityThreshold: number,
+  stateCache: StoryStateCache,
+  entityTokenCache: StoryEntityTokenCache
+) {
+  if (mergeVetoReason(a, b, details, stateCache, entityTokenCache)) {
     return false;
   }
 
@@ -507,6 +538,42 @@ function shouldMergeStories(
     details.sharedActionTokens >= 1 &&
     details.sharedStrongTokens >= 1
   );
+}
+
+function toMergeCandidate(input: MergeDecisionInput, fallbackId: string): MergeCandidateStory {
+  return {
+    id: input.id ?? fallbackId,
+    story_key: input.story_key ?? createStoryKey(input.title),
+    title: input.title,
+    editor_title: input.editor_title ?? null,
+    editor_summary: input.editor_summary ?? null,
+    status: input.status ?? "active",
+    last_seen_at: input.last_seen_at ?? new Date(0).toISOString(),
+    article_count: Math.max(1, Number(input.article_count ?? 1))
+  };
+}
+
+export function evaluateStoryMergeDecision(
+  left: MergeDecisionInput,
+  right: MergeDecisionInput,
+  similarityThreshold = 0.56
+): MergeDecisionResult {
+  const normalizedThreshold = Math.min(0.95, Math.max(0.3, similarityThreshold));
+  const a = toMergeCandidate(left, "left");
+  const b = toMergeCandidate(right, "right");
+  const tokenCache = new Map<string, string[]>();
+  const stateCache: StoryStateCache = new Map();
+  const entityTokenCache: StoryEntityTokenCache = new Map();
+  const details = mergeOverlapDetails(a, b, tokenCache);
+  const vetoReason = mergeVetoReason(a, b, details, stateCache, entityTokenCache);
+
+  return {
+    shouldMerge: vetoReason
+      ? false
+      : shouldMergeStories(a, b, details, normalizedThreshold, stateCache, entityTokenCache),
+    details,
+    vetoReason
+  };
 }
 
 function hasEditorOverrides(story: MergeCandidateStory) {

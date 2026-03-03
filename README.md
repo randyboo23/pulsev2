@@ -55,7 +55,7 @@ Techmeme for US K-12 education news.
 ## Remaining Gaps
 - Story grouping is still lexical (`story_key`) and can miscluster edge cases. Embedding-based clustering is the planned replacement.
 - Worker/orchestration path is mostly stubbed (`apps/worker`) while logic lives in web server code.
-- No fixture-based regression suite for ingestion, clustering, or ranking quality.
+- No comprehensive fixture-based regression suite yet for ingestion and ranking quality (grouping now has a focused fixture check).
 
 ## Structure
 - `apps/web`: Next.js frontend, admin, and current ingest runtime.
@@ -92,6 +92,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Run from repo root: `/Users/andydue/Desktop/pulsev2`
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
+- Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
 - What it does:
   - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),
   - prints ingest JSON stats,
@@ -101,6 +102,14 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `QA_BASE_URL` (default `http://localhost:3000`)
   - `QA_STORY_LIMIT` (default `20`)
   - `QA_SHOW_LIMIT` (default `10`)
+
+## Grouping Guardrails
+- Ingest emits grouping anomaly alerts into `admin_events` (`event_type = ingest_guardrail_alert`) when merge/split metrics cross thresholds.
+- Optional threshold env vars:
+  - `INGEST_ALERT_MERGED_STORIES` (default `25`)
+  - `INGEST_ALERT_MERGE_TO_GROUPED_RATIO` (default `0.65`)
+  - `INGEST_ALERT_MIXED_OUTLIERS` (default `1`)
+  - `INGEST_ALERT_SPLIT_STORIES` (default `1`)
 
 ## One-Time Story Backfill Merge
 - Run from repo root to merge existing duplicate story clusters:
