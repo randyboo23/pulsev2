@@ -32,6 +32,12 @@ const INGEST_ALERT_MERGED_STORIES = Number(process.env.INGEST_ALERT_MERGED_STORI
 const INGEST_ALERT_MERGE_TO_GROUPED_RATIO = Number(process.env.INGEST_ALERT_MERGE_TO_GROUPED_RATIO ?? "0.65");
 const INGEST_ALERT_MIXED_OUTLIERS = Number(process.env.INGEST_ALERT_MIXED_OUTLIERS ?? "1");
 const INGEST_ALERT_SPLIT_STORIES = Number(process.env.INGEST_ALERT_SPLIT_STORIES ?? "1");
+const INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS = envBoundedInt(
+  "INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS",
+  1,
+  1,
+  20
+);
 
 function envBoundedInt(name: string, fallback: number, min: number, max: number) {
   const raw = Number(process.env[name] ?? String(fallback));
@@ -96,6 +102,18 @@ const TOP_STORY_PREMERGE_LOOKBACK_DAYS = envBoundedInt(
 );
 const TOP_STORY_PREMERGE_SIMILARITY = envBoundedFloat(
   "TOP_STORY_PREMERGE_SIMILARITY",
+  0.54,
+  0.45,
+  0.8
+);
+const TOP_STORY_DUPLICATE_AUDIT_LIMIT = envBoundedInt(
+  "TOP_STORY_DUPLICATE_AUDIT_LIMIT",
+  10,
+  5,
+  20
+);
+const TOP_STORY_DUPLICATE_AUDIT_SIMILARITY = envBoundedFloat(
+  "TOP_STORY_DUPLICATE_AUDIT_SIMILARITY",
   0.54,
   0.45,
   0.8
@@ -430,6 +448,7 @@ type IngestResult = {
   publishGateChecked: number;
   publishGateFlagged: number;
   publishGateDemoted: number;
+  topStoryDuplicatePairs: number;
   relevanceChecked: number;
   relevanceRejected: number;
 };
@@ -2935,6 +2954,75 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
   };
 }
 
+type TopStoryDuplicatePair = {
+  leftStoryId: string;
+  rightStoryId: string;
+  leftRank: number;
+  rightRank: number;
+  leftTitle: string;
+  rightTitle: string;
+  ratio: number;
+  sharedTokens: number;
+  sharedActionTokens: number;
+  sharedStrongTokens: number;
+};
+
+async function auditTopStoryDuplicatePairs() {
+  const candidates = await getTopStories(TOP_STORY_DUPLICATE_AUDIT_LIMIT, undefined, {
+    useAiRerank: false,
+    useStoredRank: true
+  });
+  const topStories = candidates
+    .filter((story) => story.status !== "hidden")
+    .slice(0, TOP_STORY_DUPLICATE_AUDIT_LIMIT);
+
+  const pairs: TopStoryDuplicatePair[] = [];
+
+  for (let i = 0; i < topStories.length; i += 1) {
+    const left = topStories[i];
+    if (!left) continue;
+
+    for (let j = i + 1; j < topStories.length; j += 1) {
+      const right = topStories[j];
+      if (!right) continue;
+      const decision = evaluateStoryMergeDecision(
+        {
+          id: left.id,
+          title: String(left.editor_title ?? left.title ?? "").trim(),
+          status: left.status ?? "active",
+          article_count: Math.max(1, Number(left.article_count ?? 1))
+        },
+        {
+          id: right.id,
+          title: String(right.editor_title ?? right.title ?? "").trim(),
+          status: right.status ?? "active",
+          article_count: Math.max(1, Number(right.article_count ?? 1))
+        },
+        TOP_STORY_DUPLICATE_AUDIT_SIMILARITY
+      );
+      if (!decision.shouldMerge) continue;
+
+      pairs.push({
+        leftStoryId: left.id,
+        rightStoryId: right.id,
+        leftRank: i + 1,
+        rightRank: j + 1,
+        leftTitle: String(left.editor_title ?? left.title ?? "").trim(),
+        rightTitle: String(right.editor_title ?? right.title ?? "").trim(),
+        ratio: Number(decision.details.ratio.toFixed(2)),
+        sharedTokens: decision.details.sharedTokens,
+        sharedActionTokens: decision.details.sharedActionTokens,
+        sharedStrongTokens: decision.details.sharedStrongTokens
+      });
+    }
+  }
+
+  return {
+    checked: topStories.length,
+    duplicatePairs: pairs
+  };
+}
+
 export async function ingestFeeds(): Promise<IngestResult> {
   const feeds = await loadFeedRegistry();
   let fetchedItems = 0;
@@ -3286,6 +3374,20 @@ export async function ingestFeeds(): Promise<IngestResult> {
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
   const publishGate = await runTopStoriesPublishGate();
   const rankRefresh = await refreshHomepageRanks(60);
+  const topStoryDuplicateAudit = await auditTopStoryDuplicatePairs();
+  const topStoryDuplicatePairs = topStoryDuplicateAudit.duplicatePairs.length;
+  const shouldAlertOnTopStoryDuplicates =
+    Number.isFinite(INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS) &&
+    topStoryDuplicatePairs >= INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS;
+  if (shouldAlertOnTopStoryDuplicates) {
+    await recordIngestGuardrailAlert({
+      guardrailAlerts: [`top_story_duplicate_pairs:${topStoryDuplicatePairs}`],
+      topStoryDuplicateAuditChecked: topStoryDuplicateAudit.checked,
+      topStoryDuplicateAuditThreshold: INGEST_ALERT_TOP_STORY_DUPLICATE_PAIRS,
+      topStoryDuplicateAuditSimilarity: TOP_STORY_DUPLICATE_AUDIT_SIMILARITY,
+      topStoryDuplicateAuditPairs: topStoryDuplicateAudit.duplicatePairs
+    });
+  }
 
   return {
     feeds: feeds.length,
@@ -3313,6 +3415,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     publishGateChecked: publishGate.checked,
     publishGateFlagged: publishGate.flagged,
     publishGateDemoted: publishGate.demoted,
+    topStoryDuplicatePairs,
     relevanceChecked,
     relevanceRejected
   };

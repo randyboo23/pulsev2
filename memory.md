@@ -43,6 +43,7 @@ Last updated: 2026-03-03
 - Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
+- Ingest now runs a post-rank top-story duplicate audit (top 10) and emits `top_story_duplicate_pairs:N` guardrail alerts when same-event pairs still appear.
 - Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
 - Similar-story merge now normalizes legal ruling language (`blocks/finds/sides/ruled/decision`) into a shared event-action token so same-case court coverage merges more reliably.
 - Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
@@ -139,3 +140,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Updated top-story publish gate to evaluate the AI-ranked candidate pool used for persisted homepage order, lowered stale defaults to 48h (top 3) / 72h (top 10), and added iterative re-check passes so bubbled-up replacements are also screened in the same ingest run.
 - 2026-03-03: Expanded merge token canonicalization for legal-ruling phrasing so same Supreme Court case coverage from different outlets collapses into one story more consistently.
 - 2026-03-03: Added top-story merge-first prepass before publish-gate demotion, scoped to the AI-ranked top candidate set, so same-event duplicates merge before fallback demotions are applied.
+- 2026-03-03: Added automated top-10 duplicate pair audit after rank persistence; ingest now raises guardrail alerts when same-event pairs remain in homepage slots.

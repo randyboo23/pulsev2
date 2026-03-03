@@ -59,6 +59,7 @@ Top-Story Publish Gate (ingest.ts) -- audits candidate top slots before persiste
     |                                  applies stale-slot and thin-roundup demotions for low-momentum top stories
     |                                  re-runs in small iterative passes so replacement stories are also checked
     |                                  auto-demotes flagged non-pinned stories and logs `ingest_top_story_gate` each ingest run
+    |                                  final top-10 duplicate audit emits `ingest_guardrail_alert` when same-event pairs remain
     |
     v
 AI Reranking (ingest.ts -> stories.ts) -- Sonnet reorders top stories by editorial judgment
