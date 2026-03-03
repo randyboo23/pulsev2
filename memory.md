@@ -42,6 +42,7 @@ Last updated: 2026-03-03
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - Top 10 now applies state diversity caps (max 2 stories per state; max 1 per state+topic like immigration), except pinned/urgency-override stories.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
+- Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
 - Story grouping now hard-vetoes merges when stories point to different states, and when entity-token signatures conflict with no shared strong evidence.
 - Similar-story merge now normalizes legal ruling language (`blocks/finds/sides/ruled/decision`) into a shared event-action token so same-case court coverage merges more reliably.
 - Ingest now runs a post-merge mixed-story split pass that auto-detaches clear outlier articles (state-mismatch cases) into their own stories.
@@ -137,3 +138,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added manual `demoted` story status to push stories out of top homepage slots without fully hiding them; admin stories now surfaces homepage `#1-#20` context (`Top` + `Next` labels) for easier promotion decisions.
 - 2026-03-03: Updated top-story publish gate to evaluate the AI-ranked candidate pool used for persisted homepage order, lowered stale defaults to 48h (top 3) / 72h (top 10), and added iterative re-check passes so bubbled-up replacements are also screened in the same ingest run.
 - 2026-03-03: Expanded merge token canonicalization for legal-ruling phrasing so same Supreme Court case coverage from different outlets collapses into one story more consistently.
+- 2026-03-03: Added top-story merge-first prepass before publish-gate demotion, scoped to the AI-ranked top candidate set, so same-event duplicates merge before fallback demotions are applied.

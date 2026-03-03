@@ -39,6 +39,12 @@ function envBoundedInt(name: string, fallback: number, min: number, max: number)
   return Math.max(min, Math.min(max, parsed));
 }
 
+function envBoundedFloat(name: string, fallback: number, min: number, max: number) {
+  const raw = Number(process.env[name] ?? String(fallback));
+  const parsed = Number.isFinite(raw) ? raw : fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 const TOP_STORY_PUBLISH_GATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_LIMIT", 10, 5, 20);
 const TOP_STORY_PUBLISH_GATE_SCAN_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_SCAN_LIMIT", 20, 10, 40);
 const TOP_STORY_PUBLISH_GATE_MAX_PASSES = envBoundedInt("TOP_STORY_PUBLISH_GATE_MAX_PASSES", 3, 1, 6);
@@ -72,6 +78,27 @@ const TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS = envBoundedInt(
   72,
   48,
   336
+);
+const TOP_STORY_PREMERGE_ENABLED =
+  String(process.env.TOP_STORY_PREMERGE_ENABLED ?? "true").toLowerCase() !== "false";
+const TOP_STORY_PREMERGE_CANDIDATE_LIMIT = envBoundedInt(
+  "TOP_STORY_PREMERGE_CANDIDATE_LIMIT",
+  20,
+  10,
+  60
+);
+const TOP_STORY_PREMERGE_MAX_MERGES = envBoundedInt("TOP_STORY_PREMERGE_MAX_MERGES", 4, 0, 20);
+const TOP_STORY_PREMERGE_LOOKBACK_DAYS = envBoundedInt(
+  "TOP_STORY_PREMERGE_LOOKBACK_DAYS",
+  10,
+  2,
+  45
+);
+const TOP_STORY_PREMERGE_SIMILARITY = envBoundedFloat(
+  "TOP_STORY_PREMERGE_SIMILARITY",
+  0.54,
+  0.45,
+  0.8
 );
 
 const TOP_SLOT_ROUNDUP_PATTERNS = [
@@ -2739,7 +2766,63 @@ async function runTopStoriesPublishGatePass(): Promise<TopStoryPublishGatePassRe
   };
 }
 
+async function runTopStoriesPremerge() {
+  if (!TOP_STORY_PREMERGE_ENABLED || TOP_STORY_PREMERGE_MAX_MERGES <= 0) {
+    return {
+      candidateStoryIds: [] as string[],
+      candidates: 0,
+      evaluatedPairs: 0,
+      suggested: 0,
+      merged: 0
+    };
+  }
+
+  const scanLimit = Math.max(
+    TOP_STORY_PREMERGE_CANDIDATE_LIMIT,
+    TOP_STORY_PUBLISH_GATE_LIMIT,
+    TOP_STORY_PUBLISH_GATE_SCAN_LIMIT
+  );
+  const candidates = await getTopStories(scanLimit, undefined, {
+    useAiRerank: true,
+    useStoredRank: false
+  });
+  const candidateStoryIds = candidates
+    .filter((story) => story.status !== "hidden")
+    .slice(0, TOP_STORY_PREMERGE_CANDIDATE_LIMIT)
+    .map((story) => story.id);
+
+  if (candidateStoryIds.length < 2) {
+    return {
+      candidateStoryIds,
+      candidates: 0,
+      evaluatedPairs: 0,
+      suggested: 0,
+      merged: 0
+    };
+  }
+
+  const mergeResult = await mergeSimilarStories({
+    storyIds: candidateStoryIds,
+    lookbackDays: TOP_STORY_PREMERGE_LOOKBACK_DAYS,
+    candidateLimit: candidateStoryIds.length,
+    maxMerges: TOP_STORY_PREMERGE_MAX_MERGES,
+    similarityThreshold: TOP_STORY_PREMERGE_SIMILARITY
+  });
+
+  if (mergeResult.merged > 0) {
+    console.log(
+      `[ingest] top-story premerge merged ${mergeResult.merged} stories (suggested=${mergeResult.suggested}, candidates=${candidateStoryIds.length})`
+    );
+  }
+
+  return {
+    candidateStoryIds,
+    ...mergeResult
+  };
+}
+
 async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
+  const premergeResult = await runTopStoriesPremerge();
   const passSummaries: Array<{ pass: number; checked: number; flagged: number; demoted: number }> = [];
   const detailByStoryId = new Map<string, TopStoryPublishGateDetail>();
   const demotedStoryIds = new Set<string>();
@@ -2804,6 +2887,18 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     demoted,
     publishLimit,
     scanLimit,
+    topStoryPremerge: {
+      enabled: TOP_STORY_PREMERGE_ENABLED,
+      candidateLimit: TOP_STORY_PREMERGE_CANDIDATE_LIMIT,
+      lookbackDays: TOP_STORY_PREMERGE_LOOKBACK_DAYS,
+      similarityThreshold: TOP_STORY_PREMERGE_SIMILARITY,
+      maxMerges: TOP_STORY_PREMERGE_MAX_MERGES,
+      inputStories: premergeResult.candidateStoryIds.length,
+      candidates: premergeResult.candidates,
+      evaluatedPairs: premergeResult.evaluatedPairs,
+      suggested: premergeResult.suggested,
+      merged: premergeResult.merged
+    },
     passesRun: passSummaries.length,
     passSummaries,
     details: details.map((detail) => ({
@@ -2826,6 +2921,7 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
       topStoryPublishGateChecked: checked,
       topStoryPublishGateFlagged: flagged,
       topStoryPublishGateDemoted: demoted,
+      topStoryPremergeMerged: premergeResult.merged,
       topStoryPublishGatePasses: passSummaries,
       topStoryPublishGateStoryIds: Array.from(demotedStoryIds)
     });

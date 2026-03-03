@@ -52,6 +52,7 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
     |
     v
 Top-Story Publish Gate (ingest.ts) -- audits candidate top slots before persisted ranking
+    |                                  runs a merge-first prepass on the AI-ranked top candidate set
     |                                  evaluates the same AI-ranked candidate pool used for homepage persistence
     |                                  flags mixed-state/entity-conflict clusters using merge-veto heuristics
     |                                  enforces state/state+topic saturation caps in the top window

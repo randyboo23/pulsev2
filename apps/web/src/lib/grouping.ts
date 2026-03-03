@@ -293,6 +293,7 @@ export type MergeSimilarStoriesOptions = {
   maxMerges?: number;
   similarityThreshold?: number;
   dryRun?: boolean;
+  storyIds?: string[];
 };
 
 export type MergeDecisionInput = {
@@ -750,10 +751,21 @@ export async function groupUngroupedArticles() {
 
 export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = {}): Promise<MergeSimilarStoriesResult> {
   const lookbackDays = Math.max(1, Math.floor(options.lookbackDays ?? 4));
-  const candidateLimit = Math.max(20, Math.floor(options.candidateLimit ?? 180));
+  let candidateLimit = Math.max(20, Math.floor(options.candidateLimit ?? 180));
   const maxMerges = Math.max(0, Math.floor(options.maxMerges ?? 12));
   const similarityThreshold = Math.min(0.95, Math.max(0.3, options.similarityThreshold ?? 0.56));
   const dryRun = Boolean(options.dryRun);
+  const normalizedStoryIds = Array.from(
+    new Set(
+      (options.storyIds ?? [])
+        .map((storyId) => String(storyId ?? "").trim())
+        .filter((storyId) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storyId))
+    )
+  );
+  const constrainByStoryIds = normalizedStoryIds.length >= 2;
+  if (constrainByStoryIds) {
+    candidateLimit = Math.max(candidateLimit, normalizedStoryIds.length);
+  }
 
   if (maxMerges === 0) {
     return { candidates: 0, evaluatedPairs: 0, suggested: 0, merged: 0 };
@@ -773,12 +785,13 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
      join story_articles sa on sa.story_id = s.id
      join articles a on a.id = sa.article_id
      where coalesce(s.status, 'active') <> 'hidden'
+       and ($3::uuid[] is null or s.id = any($3::uuid[]))
        and s.last_seen_at >= now() - make_interval(days => $1::int)
        and coalesce(a.quality_label, 'unknown') <> 'non_article'
      group by s.id
      order by s.last_seen_at desc
      limit $2`,
-    [lookbackDays, candidateLimit]
+    [lookbackDays, candidateLimit, constrainByStoryIds ? normalizedStoryIds : null]
   );
 
   const stories = storiesResult.rows as MergeCandidateStory[];
@@ -797,8 +810,12 @@ export async function mergeSimilarStories(options: MergeSimilarStoriesOptions = 
       const b = stories[j];
       if (!b || sourceUsed.has(b.id)) continue;
 
-      const daysApart = Math.abs(new Date(a.last_seen_at).getTime() - new Date(b.last_seen_at).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysApart > lookbackDays) break;
+      if (!constrainByStoryIds) {
+        const daysApart =
+          Math.abs(new Date(a.last_seen_at).getTime() - new Date(b.last_seen_at).getTime()) /
+          (1000 * 60 * 60 * 24);
+        if (daysApart > lookbackDays) break;
+      }
 
       evaluatedPairs += 1;
       const overlap = mergeOverlapDetails(a, b, tokenCache);
