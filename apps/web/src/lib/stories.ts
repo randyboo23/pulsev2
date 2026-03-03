@@ -554,6 +554,41 @@ function normalizeGeoText(text: string) {
     .trim()} `;
 }
 
+function inferGeoStateFromNormalizedText(normalized: string) {
+  for (const entry of STATE_GEO_ALIAS_INDEX) {
+    for (const alias of entry.aliases) {
+      if (alias.length < 2) continue;
+      if (normalized.includes(` ${alias} `)) {
+        return entry.state;
+      }
+    }
+  }
+
+  return null;
+}
+
+function inferGeoTopicFromNormalizedText(normalized: string) {
+  for (const { topic, pattern } of GEO_TOPIC_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return topic;
+    }
+  }
+
+  return "general";
+}
+
+export function inferGeoStateFromTitle(title: string | null | undefined) {
+  const normalized = normalizeGeoText(String(title ?? "").trim());
+  if (normalized.trim().length === 0) return null;
+  return inferGeoStateFromNormalizedText(normalized);
+}
+
+export function inferGeoTopicFromTitle(title: string | null | undefined) {
+  const normalized = normalizeGeoText(String(title ?? "").trim());
+  if (normalized.trim().length === 0) return "general";
+  return inferGeoTopicFromNormalizedText(normalized);
+}
+
 function normalizeTopicToken(token: string) {
   let normalized = token.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!normalized) return "";
@@ -718,20 +753,9 @@ function inferStoryState(story: StoryRow, cache: StoryGeoStateCache) {
     cache.set(story.id, null);
     return null;
   }
-
-  const normalized = normalizeGeoText(title);
-  for (const entry of STATE_GEO_ALIAS_INDEX) {
-    for (const alias of entry.aliases) {
-      if (alias.length < 2) continue;
-      if (normalized.includes(` ${alias} `)) {
-        cache.set(story.id, entry.state);
-        return entry.state;
-      }
-    }
-  }
-
-  cache.set(story.id, null);
-  return null;
+  const state = inferGeoStateFromTitle(title);
+  cache.set(story.id, state);
+  return state;
 }
 
 function inferStoryTopicBucket(story: StoryRow, cache: StoryGeoTopicCache) {
@@ -743,17 +767,9 @@ function inferStoryTopicBucket(story: StoryRow, cache: StoryGeoTopicCache) {
     cache.set(story.id, "general");
     return "general";
   }
-
-  const normalized = normalizeGeoText(title);
-  for (const { topic, pattern } of GEO_TOPIC_PATTERNS) {
-    if (pattern.test(normalized)) {
-      cache.set(story.id, topic);
-      return topic;
-    }
-  }
-
-  cache.set(story.id, "general");
-  return "general";
+  const topic = inferGeoTopicFromTitle(title);
+  cache.set(story.id, topic);
+  return topic;
 }
 
 function passesTopStateDiversityGuard(

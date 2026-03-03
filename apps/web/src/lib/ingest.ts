@@ -2,8 +2,18 @@ import Parser from "rss-parser";
 import { pool } from "./db";
 import { getDefaultFeeds } from "./feeds";
 import { TRUSTED_SITES, SOURCE_TIERS } from "@pulse/core";
-import { groupUngroupedArticles, mergeSimilarStories, splitMixedStories } from "./grouping";
-import { refreshHomepageRanks } from "./stories";
+import {
+  groupUngroupedArticles,
+  mergeSimilarStories,
+  splitMixedStories,
+  evaluateStoryMergeDecision
+} from "./grouping";
+import {
+  getTopStories,
+  inferGeoStateFromTitle,
+  inferGeoTopicFromTitle,
+  refreshHomepageRanks
+} from "./stories";
 
 const parser = new Parser({
   timeout: 10000,
@@ -22,6 +32,34 @@ const INGEST_ALERT_MERGED_STORIES = Number(process.env.INGEST_ALERT_MERGED_STORI
 const INGEST_ALERT_MERGE_TO_GROUPED_RATIO = Number(process.env.INGEST_ALERT_MERGE_TO_GROUPED_RATIO ?? "0.65");
 const INGEST_ALERT_MIXED_OUTLIERS = Number(process.env.INGEST_ALERT_MIXED_OUTLIERS ?? "1");
 const INGEST_ALERT_SPLIT_STORIES = Number(process.env.INGEST_ALERT_SPLIT_STORIES ?? "1");
+
+function envBoundedInt(name: string, fallback: number, min: number, max: number) {
+  const raw = Number(process.env[name] ?? String(fallback));
+  const parsed = Number.isFinite(raw) ? Math.floor(raw) : fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+const TOP_STORY_PUBLISH_GATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_LIMIT", 10, 5, 20);
+const TOP_STORY_PUBLISH_GATE_SCAN_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_SCAN_LIMIT", 20, 10, 40);
+const TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN",
+  2,
+  1,
+  6
+);
+const TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN",
+  2,
+  1,
+  6
+);
+const TOP_STORY_PUBLISH_GATE_STATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_STATE_LIMIT", 2, 1, 4);
+const TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT",
+  1,
+  1,
+  3
+);
 
 let lastFirecrawlBudgetWarningDay = "";
 
@@ -123,6 +161,20 @@ async function recordIngestGuardrailAlert(detail: Record<string, unknown>) {
   } catch (error) {
     console.error(
       `[ingest] failed to record guardrail alert event: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+async function recordTopStoryPublishGateEvent(detail: Record<string, unknown>) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('ingest_top_story_gate', $1::jsonb)`,
+      [JSON.stringify(detail)]
+    );
+  } catch (error) {
+    console.error(
+      `[ingest] failed to record top-story gate event: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
@@ -327,8 +379,31 @@ type IngestResult = {
   summaryGeneratedLLM: number;
   summaryRejected: number;
   homepageRanked: number;
+  publishGateChecked: number;
+  publishGateFlagged: number;
+  publishGateDemoted: number;
   relevanceChecked: number;
   relevanceRejected: number;
+};
+
+type TopStoryPublishGateDetail = {
+  storyId: string;
+  rank: number;
+  title: string;
+  status: string | null | undefined;
+  state: string | null;
+  topic: string;
+  articleCount: number;
+  stateMismatchCount: number;
+  entityConflictCount: number;
+  reasons: string[];
+};
+
+type TopStoryPublishGateResult = {
+  checked: number;
+  flagged: number;
+  demoted: number;
+  details: TopStoryPublishGateDetail[];
 };
 
 type ArticleQualityLabel = "article" | "non_article" | "uncertain";
@@ -2364,6 +2439,240 @@ async function loadFeedRegistry() {
     }));
 }
 
+async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
+  const publishLimit = TOP_STORY_PUBLISH_GATE_LIMIT;
+  const scanLimit = Math.max(publishLimit, TOP_STORY_PUBLISH_GATE_SCAN_LIMIT);
+  const candidates = await getTopStories(scanLimit, undefined, {
+    useAiRerank: false,
+    useStoredRank: false
+  });
+  const gateStories = candidates
+    .filter((story) => story.status !== "hidden")
+    .slice(0, publishLimit);
+
+  if (gateStories.length === 0) {
+    return { checked: 0, flagged: 0, demoted: 0, details: [] };
+  }
+
+  const storyIds = gateStories.map((story) => story.id);
+  const storyArticles = await pool.query(
+    `select sa.story_id, a.title
+     from story_articles sa
+     join articles a on a.id = sa.article_id
+     where sa.story_id = any($1::uuid[])
+       and coalesce(a.quality_label, 'unknown') <> 'non_article'
+     order by coalesce(a.published_at, a.fetched_at) desc`,
+    [storyIds]
+  );
+
+  const articleTitlesByStory = new Map<string, string[]>();
+  for (const row of storyArticles.rows) {
+    const storyId = String(row.story_id ?? "");
+    if (!storyId) continue;
+    const title = String(row.title ?? "").trim();
+    if (!title) continue;
+    const bucket = articleTitlesByStory.get(storyId) ?? [];
+    bucket.push(title);
+    articleTitlesByStory.set(storyId, bucket);
+  }
+
+  const flaggedByStoryId = new Map<string, TopStoryPublishGateDetail>();
+  const ensureDetail = (params: {
+    storyId: string;
+    rank: number;
+    title: string;
+    status: string | null | undefined;
+    state: string | null;
+    topic: string;
+    articleCount: number;
+    stateMismatchCount: number;
+    entityConflictCount: number;
+  }) => {
+    const existing = flaggedByStoryId.get(params.storyId);
+    if (existing) return existing;
+    const detail: TopStoryPublishGateDetail = {
+      storyId: params.storyId,
+      rank: params.rank,
+      title: params.title,
+      status: params.status,
+      state: params.state,
+      topic: params.topic,
+      articleCount: params.articleCount,
+      stateMismatchCount: params.stateMismatchCount,
+      entityConflictCount: params.entityConflictCount,
+      reasons: []
+    };
+    flaggedByStoryId.set(params.storyId, detail);
+    return detail;
+  };
+
+  for (const [index, story] of gateStories.entries()) {
+    if (story.status === "pinned") continue;
+
+    const title = String(story.editor_title ?? story.title ?? "").trim();
+    if (!title) continue;
+    const articleTitles = articleTitlesByStory.get(story.id) ?? [];
+    if (articleTitles.length < 3) continue;
+
+    let stateMismatchCount = 0;
+    let entityConflictCount = 0;
+
+    for (const articleTitle of articleTitles) {
+      const decision = evaluateStoryMergeDecision(
+        {
+          id: story.id,
+          title,
+          status: story.status,
+          article_count: Math.max(1, Number(story.article_count ?? 1))
+        },
+        { title: articleTitle },
+        0.56
+      );
+      if (decision.vetoReason === "state_mismatch") {
+        stateMismatchCount += 1;
+      } else if (decision.vetoReason === "entity_conflict") {
+        entityConflictCount += 1;
+      }
+    }
+
+    const state = inferGeoStateFromTitle(title);
+    const topic = inferGeoTopicFromTitle(title);
+    const reasons: string[] = [];
+    if (stateMismatchCount >= TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN) {
+      reasons.push(`state_mismatch_articles:${stateMismatchCount}/${articleTitles.length}`);
+    }
+    if (
+      articleTitles.length >= 5 &&
+      entityConflictCount >= TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN
+    ) {
+      reasons.push(`entity_conflict_articles:${entityConflictCount}/${articleTitles.length}`);
+    }
+
+    if (reasons.length > 0) {
+      const detail = ensureDetail({
+        storyId: story.id,
+        rank: index + 1,
+        title,
+        status: story.status,
+        state,
+        topic,
+        articleCount: articleTitles.length,
+        stateMismatchCount,
+        entityConflictCount
+      });
+      for (const reason of reasons) {
+        if (!detail.reasons.includes(reason)) {
+          detail.reasons.push(reason);
+        }
+      }
+    }
+  }
+
+  const stateCounts = new Map<string, number>();
+  const stateTopicCounts = new Map<string, number>();
+  for (const [index, story] of gateStories.entries()) {
+    const title = String(story.editor_title ?? story.title ?? "").trim();
+    const state = inferGeoStateFromTitle(title);
+    const topic = inferGeoTopicFromTitle(title);
+    if (!state) continue;
+
+    const stateCount = stateCounts.get(state) ?? 0;
+    const stateTopicKey = `${state}:${topic}`;
+    const stateTopicCount = stateTopicCounts.get(stateTopicKey) ?? 0;
+
+    if (story.status !== "pinned") {
+      const detail = flaggedByStoryId.get(story.id);
+      const alreadyFlagged = Boolean(detail && detail.reasons.length > 0);
+      if (!alreadyFlagged) {
+        let diversityReason: string | null = null;
+        if (stateCount >= TOP_STORY_PUBLISH_GATE_STATE_LIMIT) {
+          diversityReason = `state_saturation:${state}`;
+        } else if (
+          topic !== "general" &&
+          stateTopicCount >= TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT
+        ) {
+          diversityReason = `state_topic_saturation:${state}:${topic}`;
+        }
+
+        if (diversityReason) {
+          const created = ensureDetail({
+            storyId: story.id,
+            rank: index + 1,
+            title,
+            status: story.status,
+            state,
+            topic,
+            articleCount: (articleTitlesByStory.get(story.id) ?? []).length,
+            stateMismatchCount: 0,
+            entityConflictCount: 0
+          });
+          if (!created.reasons.includes(diversityReason)) {
+            created.reasons.push(diversityReason);
+          }
+          continue;
+        }
+      }
+    }
+
+    stateCounts.set(state, stateCount + 1);
+    if (topic !== "general") {
+      stateTopicCounts.set(stateTopicKey, stateTopicCount + 1);
+    }
+  }
+
+  const details = Array.from(flaggedByStoryId.values())
+    .filter((detail) => detail.reasons.length > 0)
+    .sort((a, b) => a.rank - b.rank);
+  const idsToDemote = details.map((detail) => detail.storyId);
+
+  let demoted = 0;
+  if (idsToDemote.length > 0) {
+    const updateResult = await pool.query(
+      `update stories
+       set status = 'demoted',
+           updated_at = now()
+       where id = any($1::uuid[])
+         and coalesce(status, 'active') not in ('hidden', 'pinned', 'demoted')
+       returning id`,
+      [idsToDemote]
+    );
+    demoted = updateResult.rows.length;
+
+    await recordTopStoryPublishGateEvent({
+      checked: gateStories.length,
+      flagged: details.length,
+      demoted,
+      publishLimit,
+      scanLimit,
+      details: details.map((detail) => ({
+        storyId: detail.storyId,
+        rank: detail.rank,
+        title: detail.title,
+        state: detail.state,
+        topic: detail.topic,
+        reasons: detail.reasons
+      }))
+    });
+
+    if (demoted > 0) {
+      await recordIngestGuardrailAlert({
+        guardrailAlerts: [`top_story_publish_gate_demotions:${demoted}`],
+        topStoryPublishGateChecked: gateStories.length,
+        topStoryPublishGateFlagged: details.length,
+        topStoryPublishGateDemoted: demoted,
+        topStoryPublishGateStoryIds: details.map((detail) => detail.storyId)
+      });
+    }
+  }
+
+  return {
+    checked: gateStories.length,
+    flagged: details.length,
+    demoted,
+    details
+  };
+}
+
 export async function ingestFeeds(): Promise<IngestResult> {
   const feeds = await loadFeedRegistry();
   let fetchedItems = 0;
@@ -2713,6 +3022,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
     await recordIngestGuardrailAlert(detail);
   }
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
+  const publishGate = await runTopStoriesPublishGate();
   const rankRefresh = await refreshHomepageRanks(60);
 
   return {
@@ -2738,6 +3048,9 @@ export async function ingestFeeds(): Promise<IngestResult> {
     summaryGeneratedLLM: summaryFill.llmGenerated,
     summaryRejected: summaryFill.rejected,
     homepageRanked: rankRefresh.ranked,
+    publishGateChecked: publishGate.checked,
+    publishGateFlagged: publishGate.flagged,
+    publishGateDemoted: publishGate.demoted,
     relevanceChecked,
     relevanceRejected
   };

@@ -37,6 +37,7 @@ Techmeme for US K-12 education news.
 - Homepage preview dedupe suppresses near-duplicate blurb text across top stories.
 - Story previews are confidence-gated via `preview_type` and `preview_confidence`; fallback/synthetic output is stored for debugging but displayed as headline-only.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
+- Top-story publish gate runs before rank persistence to auto-demote suspect top slots (mixed-state/entity-conflict clusters and state/topic saturation spillover).
 - Automatic homepage-rank refresh on ingest (`refreshHomepageRanks`) so homepage order is precomputed in DB.
 - Story grouping by title key, plus automatic similar-story merge pass during ingest.
 - Story-merge guardrails now hard-veto cross-state/entity-conflict merges and run a post-merge outlier split pass for mixed clusters.
@@ -111,6 +112,12 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `INGEST_ALERT_MERGE_TO_GROUPED_RATIO` (default `0.65`)
   - `INGEST_ALERT_MIXED_OUTLIERS` (default `1`)
   - `INGEST_ALERT_SPLIT_STORIES` (default `1`)
+  - `TOP_STORY_PUBLISH_GATE_LIMIT` (default `10`)
+  - `TOP_STORY_PUBLISH_GATE_SCAN_LIMIT` (default `20`)
+  - `TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN` (default `2`)
+  - `TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN` (default `2`)
+  - `TOP_STORY_PUBLISH_GATE_STATE_LIMIT` (default `2`)
+  - `TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT` (default `1`)
 
 ## One-Time Story Backfill Merge
 - Run from repo root to merge existing duplicate story clusters:
