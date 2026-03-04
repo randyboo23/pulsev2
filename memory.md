@@ -94,6 +94,7 @@ Last updated: 2026-03-03
 - `/admin/stories` now surfaces recent top-story duplicate guardrail alerts with pair-level context and one-click merge/demote actions.
 - `/admin/stories` now surfaces last-24h guardrail health counters (gate runs, premerge merged/suggested, duplicate pairs/alerts, demotions, duplicate emails sent) for quick system status checks.
 - `/admin/stories` includes a "Send test guardrail email" action and shows last test status (sent/failed) so SMTP can be verified on demand.
+- `/admin/stories` now separates stories into `Top 10`, `Next 10 watchlist`, and collapsible `All other stories` so editors can focus on homepage-impacting stories first.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
@@ -151,3 +152,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added optional SMTP notifications for duplicate top-story guardrail alerts (`top_story_duplicate_pairs`) with cooldown and fingerprint dedupe; ingest fails open if email sending fails.
 - 2026-03-03: Added an admin one-click SMTP test email action and last-test status display on `/admin/stories` to validate guardrail email configuration.
 - 2026-03-03: Added lightweight 24-hour guardrail health counters to `/admin/stories` so operators can quickly see if sorting/merge guardrails are healthy without digging into DB logs.
+- 2026-03-03: Reworked `/admin/stories` into editor-first sections (`Top 10`, `Next 10 watchlist`, `All other stories`) while keeping existing merge/status actions unchanged.

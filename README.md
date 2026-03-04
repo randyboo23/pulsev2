@@ -180,6 +180,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 ## Admin
 - `/admin/stories`: status, merge, cleanup, and brief generation.
   - Homepage context rows are labeled for `Top #1-#10` and `Next #11-#20`.
+  - Stories are grouped into `Top 10 Homepage Stories`, `Next 10 Watchlist`, and collapsible `All other stories` for faster editorial triage.
   - Guardrails section shows recent `top_story_duplicate_pairs` alerts with one-click merge/demote actions per flagged pair.
   - Guardrails section now includes last-24h health counters (gate runs, premerge merged/suggested, duplicate pairs/alerts, demotions, duplicate emails sent).
   - Guardrails section also includes `Send test guardrail email` and displays latest test send status.

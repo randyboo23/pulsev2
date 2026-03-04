@@ -106,6 +106,7 @@ type GuardrailHealthTopGateRow = {
   premerge_suggested: number | string | null;
   premerge_merged: number | string | null;
   gate_demoted: number | string | null;
+  last_gate_at: string | null;
 };
 
 type GuardrailHealthDuplicateAlertRow = {
@@ -125,6 +126,7 @@ type GuardrailHealthSummary = {
   duplicateAlertRuns: number;
   duplicatePairs: number;
   duplicateEmailsSent: number;
+  lastGateAt: string | null;
 };
 
 function parseTopStoryDuplicateAlertCount(alerts: string[] | undefined) {
@@ -349,7 +351,8 @@ export default async function AdminStoriesPage() {
     gateDemoted: 0,
     duplicateAlertRuns: 0,
     duplicatePairs: 0,
-    duplicateEmailsSent: 0
+    duplicateEmailsSent: 0,
+    lastGateAt: null
   };
   try {
     const topGate = await pool.query<GuardrailHealthTopGateRow>(
@@ -357,7 +360,8 @@ export default async function AdminStoriesPage() {
          count(*)::int as gate_runs,
          coalesce(sum(coalesce((detail->'topStoryPremerge'->>'suggested')::int, 0)), 0)::int as premerge_suggested,
          coalesce(sum(coalesce((detail->'topStoryPremerge'->>'merged')::int, 0)), 0)::int as premerge_merged,
-         coalesce(sum(coalesce((detail->>'demoted')::int, 0)), 0)::int as gate_demoted
+         coalesce(sum(coalesce((detail->>'demoted')::int, 0)), 0)::int as gate_demoted,
+         max(created_at) as last_gate_at
        from admin_events
        where event_type = 'ingest_top_story_gate'
          and created_at >= now() - interval '24 hours'`
@@ -391,7 +395,8 @@ export default async function AdminStoriesPage() {
       gateDemoted: toSafeInt(gateRow?.gate_demoted),
       duplicateAlertRuns: toSafeInt(alertRow?.duplicate_alert_runs),
       duplicatePairs: toSafeInt(alertRow?.duplicate_pairs),
-      duplicateEmailsSent: toSafeInt(emailRow?.duplicate_emails_sent)
+      duplicateEmailsSent: toSafeInt(emailRow?.duplicate_emails_sent),
+      lastGateAt: gateRow?.last_gate_at ? String(gateRow.last_gate_at) : null
     };
   } catch {
     guardrailHealth = {
@@ -401,7 +406,8 @@ export default async function AdminStoriesPage() {
       gateDemoted: 0,
       duplicateAlertRuns: 0,
       duplicatePairs: 0,
-      duplicateEmailsSent: 0
+      duplicateEmailsSent: 0,
+      lastGateAt: null
     };
   }
 
@@ -457,6 +463,125 @@ export default async function AdminStoriesPage() {
     if (candidates.length >= maxCandidates) break;
   }
 
+  const latestDuplicateAlert = duplicateGuardrailAlerts[0] ?? null;
+  const latestDuplicatePairs = latestDuplicateAlert?.pairs ?? [];
+  const needsReviewCount =
+    latestDuplicatePairs.length > 0
+      ? latestDuplicatePairs.length
+      : Number(latestDuplicateAlert?.pairCount ?? 0);
+  const hasNeedsReview = needsReviewCount > 0;
+
+  const topPrimaryStories = orderedStories.filter((story) => {
+    const rank = topStoryOrder.get(story.id);
+    return rank !== undefined && rank < 10;
+  });
+  const topNextStories = orderedStories.filter((story) => {
+    const rank = topStoryOrder.get(story.id);
+    return rank !== undefined && rank >= 10 && rank < 20;
+  });
+  const otherStories = orderedStories.filter((story) => !topStoryOrder.has(story.id));
+
+  const renderStoryEditorCard = (story: StoryAdminRow) => {
+    const topRank = topStoryOrder.get(story.id);
+
+    return (
+      <div className="story" key={story.id}>
+        {topRank !== undefined ? (
+          <div className="meta">
+            {topRank < 10 ? `Homepage Top #${topRank + 1}` : `Homepage Next #${topRank + 1}`}
+          </div>
+        ) : null}
+        <div className="meta">
+          Updated {new Date(story.last_seen_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+          })}{" "}
+          · {story.article_count ?? 0} sources
+        </div>
+        {story.source_names?.length ? (
+          <div className="meta">
+            {story.source_names.slice(0, 3).join(", ")}
+            {story.source_names.length > 3
+              ? ` +${story.source_names.length - 3} more`
+              : ""}
+          </div>
+        ) : null}
+        {story.top_articles?.length ? (
+          <div className="preview-list">
+            {story.top_articles.map((item, index) => (
+              <div className="preview-item" key={`${story.id}-preview-${index}`}>
+                <a href={item.url} target="_blank" rel="noreferrer">
+                  {item.title ?? "Untitled"}
+                </a>
+                <span>{item.source ?? "Unknown"}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="meta">
+          <a href={`/stories/${story.id}`} className="admin-link">
+            View story
+          </a>
+        </div>
+        <form action={updateStory} className="story-list">
+          <input type="hidden" name="id" value={story.id} />
+          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Status</label>
+          <select
+            name="status"
+            defaultValue={story.status ?? "active"}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+          >
+            <option value="active">active</option>
+            <option value="pinned">pinned</option>
+            <option value="demoted">demoted</option>
+            <option value="hidden">hidden</option>
+          </select>
+          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
+          <input
+            type="text"
+            name="editor_title"
+            defaultValue={story.editor_title ?? ""}
+            placeholder={story.title}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+          />
+          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor summary</label>
+          <textarea
+            name="editor_summary"
+            defaultValue={story.editor_summary ?? ""}
+            placeholder={story.summary ?? ""}
+            rows={3}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+          />
+          <button className="filter" type="submit">Save</button>
+        </form>
+
+        <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
+          <input type="hidden" name="id" value={story.id} />
+          <button className="filter" type="submit">Hide as international</button>
+        </form>
+
+        <form action={demoteStory} className="story-list" style={{ marginTop: "8px" }}>
+          <input type="hidden" name="id" value={story.id} />
+          <button className="filter" type="submit">Demote on homepage</button>
+        </form>
+
+        <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>
+          <input type="hidden" name="source_id" value={story.id} />
+          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Merge into</label>
+          <input
+            type="text"
+            name="target_id"
+            placeholder="Target story id"
+            list="story-ids"
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+          />
+          <button className="filter" type="submit">Merge</button>
+        </form>
+      </div>
+    );
+  };
+
   return (
     <main className="main">
       <header className="header">
@@ -473,14 +598,14 @@ export default async function AdminStoriesPage() {
 
       <section className="card">
         <h2>Guardrails</h2>
-        <p>Recent top-story duplicate alerts from ingest with one-click fixes.</p>
+        <p>Editorial health at a glance and quick actions for possible duplicate stories.</p>
         <div className="chips" style={{ marginTop: "12px" }}>
-          <span className="chip">Last 24h gate runs: {guardrailHealth.gateRuns}</span>
-          <span className="chip">Last 24h premerge: {guardrailHealth.premergeMerged}/{guardrailHealth.premergeSuggested} merged/suggested</span>
-          <span className="chip">Last 24h duplicate pairs: {guardrailHealth.duplicatePairs}</span>
-          <span className="chip">Last 24h duplicate alerts: {guardrailHealth.duplicateAlertRuns}</span>
-          <span className="chip">Last 24h gate demotions: {guardrailHealth.gateDemoted}</span>
-          <span className="chip">Last 24h duplicate emails sent: {guardrailHealth.duplicateEmailsSent}</span>
+          <span className="chip">Needs review now: {needsReviewCount}</span>
+          <span className="chip">Last ingest: {guardrailHealth.lastGateAt ? new Date(guardrailHealth.lastGateAt).toLocaleString("en-US") : "No ingest in 24h"}</span>
+          <span className="chip">Auto-merged stories (24h): {guardrailHealth.premergeMerged}/{guardrailHealth.premergeSuggested}</span>
+          <span className="chip">Possible duplicates found (24h): {guardrailHealth.duplicatePairs}</span>
+          <span className="chip">Stories moved down automatically (24h): {guardrailHealth.gateDemoted}</span>
+          <span className="chip">Duplicate alert emails sent (24h): {guardrailHealth.duplicateEmailsSent}</span>
         </div>
         <div className="chips" style={{ marginTop: "12px" }}>
           <form action={sendGuardrailTestEmail}>
@@ -501,81 +626,107 @@ export default async function AdminStoriesPage() {
             <span className="chip">No test email run yet</span>
           )}
         </div>
-        {duplicateGuardrailAlerts.length === 0 ? (
-          <div className="meta">No duplicate-pair alerts in the latest ingest runs.</div>
+        <div className="meta" style={{ marginTop: "12px" }}>
+          `Merge (Recommended)` combines two versions of the same event into one story. `Move lower story down` keeps both stories but removes the weaker one from top slots.
+        </div>
+        {!hasNeedsReview ? (
+          <div className="story" style={{ marginTop: "12px", borderColor: "var(--rule)" }}>
+            <div className="meta">No possible duplicate stories need review right now.</div>
+          </div>
         ) : (
           <div className="story-list">
-            {duplicateGuardrailAlerts.map((alert, alertIndex) => (
-              <div className="story" key={`duplicate-alert-${alertIndex}`}>
-                <div className="meta">
-                  {new Date(alert.createdAt).toLocaleString("en-US")} · {alert.pairCount} duplicate pair
-                  {alert.pairCount === 1 ? "" : "s"} in top {alert.checked || 10}
-                </div>
-                <div className="meta">
-                  Similarity threshold {alert.similarity > 0 ? alert.similarity.toFixed(2) : "n/a"}
-                </div>
-                {alert.pairs.length > 0 ? (
-                  <div className="preview-list">
-                    {alert.pairs.map((pair, pairIndex) => {
-                      const targetIsLeft = pair.leftRank <= pair.rightRank;
-                      const targetId = targetIsLeft ? pair.leftStoryId : pair.rightStoryId;
-                      const targetTitle = targetIsLeft ? pair.leftTitle : pair.rightTitle;
-                      const targetRank = targetIsLeft ? pair.leftRank : pair.rightRank;
-                      const sourceId = targetIsLeft ? pair.rightStoryId : pair.leftStoryId;
-                      const sourceTitle = targetIsLeft ? pair.rightTitle : pair.leftTitle;
-                      const sourceRank = targetIsLeft ? pair.rightRank : pair.leftRank;
+            <h3>Needs Review</h3>
+            <div className="meta">
+              {latestDuplicateAlert
+                ? `Detected ${new Date(latestDuplicateAlert.createdAt).toLocaleString("en-US")} · ${latestDuplicateAlert.pairCount} possible duplicate pair${latestDuplicateAlert.pairCount === 1 ? "" : "s"}`
+                : "Possible duplicate stories detected"}
+            </div>
+            {latestDuplicatePairs.length > 0 ? (
+              latestDuplicatePairs.map((pair, pairIndex) => {
+                const targetIsLeft = pair.leftRank <= pair.rightRank;
+                const targetId = targetIsLeft ? pair.leftStoryId : pair.rightStoryId;
+                const targetTitle = targetIsLeft ? pair.leftTitle : pair.rightTitle;
+                const targetRank = targetIsLeft ? pair.leftRank : pair.rightRank;
+                const sourceId = targetIsLeft ? pair.rightStoryId : pair.leftStoryId;
+                const sourceTitle = targetIsLeft ? pair.rightTitle : pair.leftTitle;
+                const sourceRank = targetIsLeft ? pair.rightRank : pair.leftRank;
 
-                      return (
-                        <div className="preview-item" key={`duplicate-pair-${alertIndex}-${pairIndex}`}>
-                          <div>
-                            <strong>
-                              #{pair.leftRank}: {pair.leftTitle}
-                            </strong>
-                            <div className="meta">
-                              <a href={`/stories/${pair.leftStoryId}`} className="admin-link">View left story</a>
-                            </div>
-                            <strong>
-                              #{pair.rightRank}: {pair.rightTitle}
-                            </strong>
-                            <div className="meta">
-                              <a href={`/stories/${pair.rightStoryId}`} className="admin-link">View right story</a>
-                            </div>
-                            <div className="meta">
-                              overlap {Math.round(pair.ratio * 100)}% · shared {pair.sharedTokens} · action {pair.sharedActionTokens} · strong {pair.sharedStrongTokens}
-                            </div>
-                          </div>
-                          <div className="story-list" style={{ minWidth: "220px" }}>
-                            <form action={mergeStory}>
-                              <input type="hidden" name="source_id" value={sourceId} />
-                              <input type="hidden" name="target_id" value={targetId} />
-                              <button className="filter" type="submit">
-                                Merge #{sourceRank} into #{targetRank}
-                              </button>
-                            </form>
-                            <form action={demoteStory}>
-                              <input type="hidden" name="id" value={sourceId} />
-                              <button className="filter" type="submit">
-                                Demote #{sourceRank}
-                              </button>
-                            </form>
-                            <div className="meta">
-                              Recommended target: #{targetRank} {targetTitle}
-                            </div>
-                            <div className="meta">
-                              Source candidate: #{sourceRank} {sourceTitle}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                return (
+                  <div className="story" key={`review-pair-${pairIndex}`} style={{ marginTop: "12px" }}>
+                    <h3>
+                      Possible duplicate: #{pair.leftRank} and #{pair.rightRank}
+                    </h3>
+                    <div className="preview-list">
+                      <div className="preview-item">
+                        <strong>#{pair.leftRank}: {pair.leftTitle}</strong>
+                        <a href={`/stories/${pair.leftStoryId}`} className="admin-link">View story</a>
+                      </div>
+                      <div className="preview-item">
+                        <strong>#{pair.rightRank}: {pair.rightTitle}</strong>
+                        <a href={`/stories/${pair.rightStoryId}`} className="admin-link">View story</a>
+                      </div>
+                    </div>
+                    <div className="story-list" style={{ gap: "8px", marginTop: "8px" }}>
+                      <form action={mergeStory}>
+                        <input type="hidden" name="source_id" value={sourceId} />
+                        <input type="hidden" name="target_id" value={targetId} />
+                        <button className="filter" type="submit">
+                          Merge (Recommended): #{sourceRank} into #{targetRank}
+                        </button>
+                      </form>
+                      <div className="meta">
+                        Recommended merge target is #{targetRank} because it is ranked higher on the homepage.
+                      </div>
+                      <form action={demoteStory}>
+                        <input type="hidden" name="id" value={sourceId} />
+                        <button className="filter" type="submit">
+                          Move lower story down (#{sourceRank})
+                        </button>
+                      </form>
+                      <div className="meta">
+                        Use this if they are related but not truly the same event.
+                      </div>
+                    </div>
+                    <details style={{ marginTop: "10px" }}>
+                      <summary className="admin-link">Show technical details</summary>
+                      <div className="meta">
+                        overlap {Math.round(pair.ratio * 100)}% · shared {pair.sharedTokens} · action {pair.sharedActionTokens} · strong {pair.sharedStrongTokens}
+                      </div>
+                      <div className="meta">
+                        IDs: {pair.leftStoryId} · {pair.rightStoryId}
+                      </div>
+                      <div className="meta">
+                        Recommended target: #{targetRank} {targetTitle}
+                      </div>
+                      <div className="meta">
+                        Lower-ranked source: #{sourceRank} {sourceTitle}
+                      </div>
+                    </details>
                   </div>
-                ) : (
-                  <div className="meta">Alert recorded without pair payload details.</div>
-                )}
+                );
+              })
+            ) : (
+              <div className="story" style={{ marginTop: "12px", borderColor: "var(--rule)" }}>
+                <div className="meta">
+                  A duplicate alert was logged, but pair details were not included in that run.
+                </div>
               </div>
-            ))}
+            )}
           </div>
         )}
+        {duplicateGuardrailAlerts.length > 0 ? (
+          <details style={{ marginTop: "12px" }}>
+            <summary className="admin-link">Recent duplicate alert history (last 5)</summary>
+            <div className="story-list" style={{ marginTop: "8px" }}>
+              {duplicateGuardrailAlerts.map((alert, alertIndex) => (
+                <div className="meta" key={`alert-history-${alertIndex}`}>
+                  {new Date(alert.createdAt).toLocaleString("en-US")} · {alert.pairCount} pair
+                  {alert.pairCount === 1 ? "" : "s"} · checked top {alert.checked || 10}
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </section>
 
       <section className="card">
@@ -627,107 +778,42 @@ export default async function AdminStoriesPage() {
             ))}
           </div>
         ) : null}
-        <div className="story-list">
-          {orderedStories.map((story) => {
-            const topRank = topStoryOrder.get(story.id);
-            return (
-              <div className="story" key={story.id}>
-                {topRank !== undefined ? (
-                  <div className="meta">
-                    {topRank < 10 ? `Homepage Top #${topRank + 1}` : `Homepage Next #${topRank + 1}`}
-                  </div>
-                ) : null}
-                <div className="meta">
-                  Updated {new Date(story.last_seen_at).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric"
-                  })}{" "}
-                  · {story.article_count ?? 0} sources
-                </div>
-                {story.source_names?.length ? (
-                  <div className="meta">
-                    {story.source_names.slice(0, 3).join(", ")}
-                    {story.source_names.length > 3
-                      ? ` +${story.source_names.length - 3} more`
-                      : ""}
-                  </div>
-                ) : null}
-                {story.top_articles?.length ? (
-                  <div className="preview-list">
-                    {story.top_articles.map((item, index) => (
-                      <div className="preview-item" key={`${story.id}-preview-${index}`}>
-                        <a href={item.url} target="_blank" rel="noreferrer">
-                          {item.title ?? "Untitled"}
-                        </a>
-                        <span>{item.source ?? "Unknown"}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="meta">
-                  <a href={`/stories/${story.id}`} className="admin-link">
-                    View story
-                  </a>
-                </div>
-                <form action={updateStory} className="story-list">
-                  <input type="hidden" name="id" value={story.id} />
-                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Status</label>
-                  <select
-                    name="status"
-                    defaultValue={story.status ?? "active"}
-                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                  >
-                    <option value="active">active</option>
-                    <option value="pinned">pinned</option>
-                    <option value="demoted">demoted</option>
-                    <option value="hidden">hidden</option>
-                  </select>
-                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
-                  <input
-                    type="text"
-                    name="editor_title"
-                    defaultValue={story.editor_title ?? ""}
-                    placeholder={story.title}
-                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                  />
-                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor summary</label>
-                  <textarea
-                    name="editor_summary"
-                    defaultValue={story.editor_summary ?? ""}
-                    placeholder={story.summary ?? ""}
-                    rows={3}
-                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                  />
-                  <button className="filter" type="submit">Save</button>
-                </form>
-
-                <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
-                  <input type="hidden" name="id" value={story.id} />
-                  <button className="filter" type="submit">Hide as international</button>
-                </form>
-
-                <form action={demoteStory} className="story-list" style={{ marginTop: "8px" }}>
-                  <input type="hidden" name="id" value={story.id} />
-                  <button className="filter" type="submit">Demote on homepage</button>
-                </form>
-
-                <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>
-                  <input type="hidden" name="source_id" value={story.id} />
-                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>Merge into</label>
-                  <input
-                    type="text"
-                    name="target_id"
-                    placeholder="Target story id"
-                    list="story-ids"
-                    style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                  />
-                  <button className="filter" type="submit">Merge</button>
-                </form>
-              </div>
-            );
-          })}
+        <div className="story-list" style={{ marginTop: "12px" }}>
+          <h3>Top 10 Homepage Stories</h3>
+          <div className="meta">Most important stories to review first.</div>
+          {topPrimaryStories.length > 0 ? (
+            topPrimaryStories.map((story) => renderStoryEditorCard(story))
+          ) : (
+            <div className="story">
+              <div className="meta">No stories currently ranked in the top 10.</div>
+            </div>
+          )}
         </div>
+
+        <div className="story-list" style={{ marginTop: "20px" }}>
+          <h3>Next 10 Watchlist</h3>
+          <div className="meta">Stories ranked #11-#20 that can move into the homepage top 10.</div>
+          {topNextStories.length > 0 ? (
+            topNextStories.map((story) => renderStoryEditorCard(story))
+          ) : (
+            <div className="story">
+              <div className="meta">No stories currently in the #11-#20 watchlist.</div>
+            </div>
+          )}
+        </div>
+
+        <details style={{ marginTop: "20px" }}>
+          <summary className="admin-link">All other stories ({otherStories.length})</summary>
+          <div className="story-list" style={{ marginTop: "10px" }}>
+            {otherStories.length > 0 ? (
+              otherStories.map((story) => renderStoryEditorCard(story))
+            ) : (
+              <div className="story">
+                <div className="meta">No additional stories available.</div>
+              </div>
+            )}
+          </div>
+        </details>
       </section>
 
       <datalist id="story-ids">
