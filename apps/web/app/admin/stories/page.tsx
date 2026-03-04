@@ -470,6 +470,9 @@ export default async function AdminStoriesPage() {
       ? latestDuplicatePairs.length
       : Number(latestDuplicateAlert?.pairCount ?? 0);
   const hasNeedsReview = needsReviewCount > 0;
+  const lastIngestLabel = guardrailHealth.lastGateAt
+    ? new Date(guardrailHealth.lastGateAt).toLocaleString("en-US")
+    : "No ingest in 24h";
 
   const topPrimaryStories = orderedStories.filter((story) => {
     const rank = topStoryOrder.get(story.id);
@@ -526,58 +529,69 @@ export default async function AdminStoriesPage() {
         </div>
         <form action={updateStory} className="story-list">
           <input type="hidden" name="id" value={story.id} />
-          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Status</label>
+          <label style={{ fontSize: "12px", color: "var(--ink-faded)" }}>Status</label>
           <select
             name="status"
             defaultValue={story.status ?? "active"}
-            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
           >
             <option value="active">active</option>
             <option value="pinned">pinned</option>
             <option value="demoted">demoted</option>
             <option value="hidden">hidden</option>
           </select>
-          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor title</label>
+          <label style={{ fontSize: "12px", color: "var(--ink-faded)" }}>Editor title</label>
           <input
             type="text"
             name="editor_title"
             defaultValue={story.editor_title ?? ""}
             placeholder={story.title}
-            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
           />
-          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Editor summary</label>
+          <label style={{ fontSize: "12px", color: "var(--ink-faded)" }}>Editor summary</label>
           <textarea
             name="editor_summary"
             defaultValue={story.editor_summary ?? ""}
             placeholder={story.summary ?? ""}
             rows={3}
-            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
+            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
           />
-          <button className="filter" type="submit">Save</button>
+          <button className="admin-action" type="submit">Save</button>
         </form>
 
-        <form action={hideInternational} className="story-list" style={{ marginTop: "8px" }}>
-          <input type="hidden" name="id" value={story.id} />
-          <button className="filter" type="submit">Hide as international</button>
-        </form>
+        <div className="admin-action-row" style={{ marginTop: "8px" }}>
+          <form action={demoteStory}>
+            <input type="hidden" name="id" value={story.id} />
+            <button className="admin-action admin-action-secondary" type="submit">
+              Demote on homepage
+            </button>
+          </form>
+        </div>
 
-        <form action={demoteStory} className="story-list" style={{ marginTop: "8px" }}>
-          <input type="hidden" name="id" value={story.id} />
-          <button className="filter" type="submit">Demote on homepage</button>
-        </form>
+        <details className="admin-inline-details" style={{ marginTop: "8px" }}>
+          <summary className="admin-link">More actions</summary>
+          <div className="story-list" style={{ gap: "8px", marginTop: "8px" }}>
+            <form action={hideInternational}>
+              <input type="hidden" name="id" value={story.id} />
+              <button className="admin-action admin-action-secondary" type="submit">
+                Hide as international
+              </button>
+            </form>
 
-        <form action={mergeStory} className="story-list" style={{ marginTop: "12px" }}>
-          <input type="hidden" name="source_id" value={story.id} />
-          <label style={{ fontSize: "12px", color: "var(--muted)" }}>Merge into</label>
-          <input
-            type="text"
-            name="target_id"
-            placeholder="Target story id"
-            list="story-ids"
-            style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
-          />
-          <button className="filter" type="submit">Merge</button>
-        </form>
+            <form action={mergeStory} className="story-list">
+              <input type="hidden" name="source_id" value={story.id} />
+              <label style={{ fontSize: "12px", color: "var(--ink-faded)" }}>Merge into</label>
+              <input
+                type="text"
+                name="target_id"
+                placeholder="Target story id"
+                list="story-ids"
+                style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
+              />
+              <button className="admin-action admin-action-secondary" type="submit">Merge</button>
+            </form>
+          </div>
+        </details>
       </div>
     );
   };
@@ -599,32 +613,55 @@ export default async function AdminStoriesPage() {
       <section className="card">
         <h2>Guardrails</h2>
         <p>Editorial health at a glance and quick actions for possible duplicate stories.</p>
-        <div className="chips" style={{ marginTop: "12px" }}>
-          <span className="chip">Needs review now: {needsReviewCount}</span>
-          <span className="chip">Last ingest: {guardrailHealth.lastGateAt ? new Date(guardrailHealth.lastGateAt).toLocaleString("en-US") : "No ingest in 24h"}</span>
-          <span className="chip">Auto-merged stories (24h): {guardrailHealth.premergeMerged}/{guardrailHealth.premergeSuggested}</span>
-          <span className="chip">Possible duplicates found (24h): {guardrailHealth.duplicatePairs}</span>
-          <span className="chip">Stories moved down automatically (24h): {guardrailHealth.gateDemoted}</span>
-          <span className="chip">Duplicate alert emails sent (24h): {guardrailHealth.duplicateEmailsSent}</span>
+        <div className="admin-stat-grid" style={{ marginTop: "12px" }}>
+          <div className={`admin-stat-card ${hasNeedsReview ? "is-alert" : "is-ok"}`}>
+            <div className="admin-stat-label">Needs review now</div>
+            <div className="admin-stat-value">{needsReviewCount}</div>
+          </div>
+          <div className="admin-stat-card">
+            <div className="admin-stat-label">Last ingest</div>
+            <div className="admin-stat-value admin-stat-value-small">{lastIngestLabel}</div>
+          </div>
+          <div className="admin-stat-card">
+            <div className="admin-stat-label">Auto-merged stories (24h)</div>
+            <div className="admin-stat-value">
+              {guardrailHealth.premergeMerged}/{guardrailHealth.premergeSuggested}
+            </div>
+          </div>
+          <div className="admin-stat-card">
+            <div className="admin-stat-label">Possible duplicates found (24h)</div>
+            <div className="admin-stat-value">{guardrailHealth.duplicatePairs}</div>
+          </div>
+          <div className="admin-stat-card">
+            <div className="admin-stat-label">Stories moved down (24h)</div>
+            <div className="admin-stat-value">{guardrailHealth.gateDemoted}</div>
+          </div>
+          <div className="admin-stat-card">
+            <div className="admin-stat-label">Duplicate alert emails sent (24h)</div>
+            <div className="admin-stat-value">{guardrailHealth.duplicateEmailsSent}</div>
+          </div>
         </div>
-        <div className="chips" style={{ marginTop: "12px" }}>
+        <div className="admin-action-row" style={{ marginTop: "12px" }}>
           <form action={sendGuardrailTestEmail}>
-            <button className="chip" type="submit">Send test guardrail email</button>
+            <button className="admin-action admin-action-secondary" type="submit">
+              Send test guardrail email
+            </button>
           </form>
-          {latestGuardrailTestEmail ? (
-            <span className="chip">
-              Last test {latestGuardrailTestEmail.sent ? "sent" : "failed"}{" "}
-              {new Date(latestGuardrailTestEmail.createdAt).toLocaleString("en-US")}
-              {latestGuardrailTestEmail.recipients.length > 0
-                ? ` · to ${latestGuardrailTestEmail.recipients.join(", ")}`
-                : ""}
-              {!latestGuardrailTestEmail.sent && latestGuardrailTestEmail.error
-                ? ` · ${latestGuardrailTestEmail.error.slice(0, 120)}`
-                : ""}
-            </span>
-          ) : (
-            <span className="chip">No test email run yet</span>
-          )}
+        </div>
+        <div className="admin-inline-note">
+          {latestGuardrailTestEmail
+            ? `Last test ${latestGuardrailTestEmail.sent ? "sent" : "failed"} ${new Date(
+                latestGuardrailTestEmail.createdAt
+              ).toLocaleString("en-US")}${
+                latestGuardrailTestEmail.recipients.length > 0
+                  ? ` · to ${latestGuardrailTestEmail.recipients.join(", ")}`
+                  : ""
+              }${
+                !latestGuardrailTestEmail.sent && latestGuardrailTestEmail.error
+                  ? ` · ${latestGuardrailTestEmail.error.slice(0, 120)}`
+                  : ""
+              }`
+            : "No test email run yet"}
         </div>
         <div className="meta" style={{ marginTop: "12px" }}>
           `Merge (Recommended)` combines two versions of the same event into one story. `Move lower story down` keeps both stories but removes the weaker one from top slots.
@@ -670,7 +707,7 @@ export default async function AdminStoriesPage() {
                       <form action={mergeStory}>
                         <input type="hidden" name="source_id" value={sourceId} />
                         <input type="hidden" name="target_id" value={targetId} />
-                        <button className="filter" type="submit">
+                        <button className="admin-action" type="submit">
                           Merge (Recommended): #{sourceRank} into #{targetRank}
                         </button>
                       </form>
@@ -679,7 +716,7 @@ export default async function AdminStoriesPage() {
                       </div>
                       <form action={demoteStory}>
                         <input type="hidden" name="id" value={sourceId} />
-                        <button className="filter" type="submit">
+                        <button className="admin-action admin-action-secondary" type="submit">
                           Move lower story down (#{sourceRank})
                         </button>
                       </form>
@@ -732,25 +769,34 @@ export default async function AdminStoriesPage() {
       <section className="card">
         <h2>Stories</h2>
         <p>Adjust status, edit titles, or merge duplicates.</p>
-        <div className="chips" style={{ marginTop: "12px" }}>
-          <span className="chip">US-only filter enabled</span>
-          <span className="chip">
+        <div className="admin-badge-row" style={{ marginTop: "12px" }}>
+          <span className="admin-badge">US-only filter enabled</span>
+          <span className="admin-badge">
             Last cleanup {lastCleanup ? new Date(lastCleanup).toLocaleString("en-US") : "never"}
           </span>
-          <span className="chip">Homepage Top 10 loaded: {topStoryPrimaryCount}</span>
-          <span className="chip">Next 10 watchlist: {topStoryNextCount}</span>
+          <span className="admin-badge">Homepage Top 10 loaded: {topStoryPrimaryCount}</span>
+          <span className="admin-badge">Next 10 watchlist: {topStoryNextCount}</span>
           {lastCleanupStats ? (
-            <span className="chip">
+            <span className="admin-badge">
               {lastCleanupStats.deleted_articles ?? 0} articles, {lastCleanupStats.deleted_stories ?? 0} stories removed
             </span>
           ) : null}
-          <form action="/api/admin/cleanup-international" method="post">
-            <button className="chip" type="submit">Re-run international cleanup</button>
-          </form>
-          <form action="/api/admin/generate-summaries" method="post">
-            <button className="chip" type="submit">Backfill story briefs (manual)</button>
-          </form>
         </div>
+        <details className="admin-inline-details" style={{ marginTop: "12px" }}>
+          <summary className="admin-link">Advanced maintenance actions</summary>
+          <div className="admin-action-row" style={{ marginTop: "10px" }}>
+            <form action="/api/admin/cleanup-international" method="post">
+              <button className="admin-action admin-action-secondary" type="submit">
+                Re-run international cleanup
+              </button>
+            </form>
+            <form action="/api/admin/generate-summaries" method="post">
+              <button className="admin-action admin-action-secondary" type="submit">
+                Backfill story briefs (manual)
+              </button>
+            </form>
+          </div>
+        </details>
         {candidates.length > 0 ? (
           <div className="story-list">
             <h3>Suggested merges</h3>
@@ -770,7 +816,7 @@ export default async function AdminStoriesPage() {
                 <form action={mergeStory} className="story-list">
                   <input type="hidden" name="source_id" value={pair.source.id} />
                   <input type="hidden" name="target_id" value={pair.target.id} />
-                  <button className="filter" type="submit">
+                  <button className="admin-action" type="submit">
                     Merge into stronger story
                   </button>
                 </form>
