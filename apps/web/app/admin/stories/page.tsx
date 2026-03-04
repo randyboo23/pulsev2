@@ -101,6 +101,32 @@ type GuardrailTestEmailStatus = {
   error: string | null;
 };
 
+type GuardrailHealthTopGateRow = {
+  gate_runs: number | string | null;
+  premerge_suggested: number | string | null;
+  premerge_merged: number | string | null;
+  gate_demoted: number | string | null;
+};
+
+type GuardrailHealthDuplicateAlertRow = {
+  duplicate_alert_runs: number | string | null;
+  duplicate_pairs: number | string | null;
+};
+
+type GuardrailHealthEmailRow = {
+  duplicate_emails_sent: number | string | null;
+};
+
+type GuardrailHealthSummary = {
+  gateRuns: number;
+  premergeSuggested: number;
+  premergeMerged: number;
+  gateDemoted: number;
+  duplicateAlertRuns: number;
+  duplicatePairs: number;
+  duplicateEmailsSent: number;
+};
+
 function parseTopStoryDuplicateAlertCount(alerts: string[] | undefined) {
   if (!Array.isArray(alerts)) return 0;
   const duplicateAlert = alerts.find((value) => value.startsWith("top_story_duplicate_pairs:"));
@@ -163,6 +189,11 @@ function sanitizeEmailErrorForDisplay(raw: string | null) {
   );
   const redactedGeneric = redactedAuthCommand.replace(/[A-Za-z0-9+/=]{24,}/g, "[REDACTED]");
   return redactedGeneric;
+}
+
+function toSafeInt(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 }
 
 export default async function AdminStoriesPage() {
@@ -311,6 +342,69 @@ export default async function AdminStoriesPage() {
     latestGuardrailTestEmail = null;
   }
 
+  let guardrailHealth: GuardrailHealthSummary = {
+    gateRuns: 0,
+    premergeSuggested: 0,
+    premergeMerged: 0,
+    gateDemoted: 0,
+    duplicateAlertRuns: 0,
+    duplicatePairs: 0,
+    duplicateEmailsSent: 0
+  };
+  try {
+    const topGate = await pool.query<GuardrailHealthTopGateRow>(
+      `select
+         count(*)::int as gate_runs,
+         coalesce(sum(coalesce((detail->'topStoryPremerge'->>'suggested')::int, 0)), 0)::int as premerge_suggested,
+         coalesce(sum(coalesce((detail->'topStoryPremerge'->>'merged')::int, 0)), 0)::int as premerge_merged,
+         coalesce(sum(coalesce((detail->>'demoted')::int, 0)), 0)::int as gate_demoted
+       from admin_events
+       where event_type = 'ingest_top_story_gate'
+         and created_at >= now() - interval '24 hours'`
+    );
+    const duplicateAlerts = await pool.query<GuardrailHealthDuplicateAlertRow>(
+      `select
+         count(*)::int as duplicate_alert_runs,
+         coalesce(sum(split_part(alert.value, ':', 2)::int), 0)::int as duplicate_pairs
+       from admin_events e
+       cross join lateral jsonb_array_elements_text(coalesce(e.detail->'guardrailAlerts', '[]'::jsonb)) as alert(value)
+       where e.event_type = 'ingest_guardrail_alert'
+         and e.created_at >= now() - interval '24 hours'
+         and alert.value like 'top_story_duplicate_pairs:%'`
+    );
+    const duplicateEmails = await pool.query<GuardrailHealthEmailRow>(
+      `select
+         count(*) filter (where coalesce((detail->>'sent')::boolean, false))::int as duplicate_emails_sent
+       from admin_events
+       where event_type = 'ingest_guardrail_email'
+         and created_at >= now() - interval '24 hours'
+         and coalesce(detail->>'alertType', '') = 'top_story_duplicate_pairs'`
+    );
+
+    const gateRow = topGate.rows[0];
+    const alertRow = duplicateAlerts.rows[0];
+    const emailRow = duplicateEmails.rows[0];
+    guardrailHealth = {
+      gateRuns: toSafeInt(gateRow?.gate_runs),
+      premergeSuggested: toSafeInt(gateRow?.premerge_suggested),
+      premergeMerged: toSafeInt(gateRow?.premerge_merged),
+      gateDemoted: toSafeInt(gateRow?.gate_demoted),
+      duplicateAlertRuns: toSafeInt(alertRow?.duplicate_alert_runs),
+      duplicatePairs: toSafeInt(alertRow?.duplicate_pairs),
+      duplicateEmailsSent: toSafeInt(emailRow?.duplicate_emails_sent)
+    };
+  } catch {
+    guardrailHealth = {
+      gateRuns: 0,
+      premergeSuggested: 0,
+      premergeMerged: 0,
+      gateDemoted: 0,
+      duplicateAlertRuns: 0,
+      duplicatePairs: 0,
+      duplicateEmailsSent: 0
+    };
+  }
+
   const candidates: MergeCandidate[] = [];
   const maxCandidates = 8;
   const windowDays = 4;
@@ -380,6 +474,14 @@ export default async function AdminStoriesPage() {
       <section className="card">
         <h2>Guardrails</h2>
         <p>Recent top-story duplicate alerts from ingest with one-click fixes.</p>
+        <div className="chips" style={{ marginTop: "12px" }}>
+          <span className="chip">Last 24h gate runs: {guardrailHealth.gateRuns}</span>
+          <span className="chip">Last 24h premerge: {guardrailHealth.premergeMerged}/{guardrailHealth.premergeSuggested} merged/suggested</span>
+          <span className="chip">Last 24h duplicate pairs: {guardrailHealth.duplicatePairs}</span>
+          <span className="chip">Last 24h duplicate alerts: {guardrailHealth.duplicateAlertRuns}</span>
+          <span className="chip">Last 24h gate demotions: {guardrailHealth.gateDemoted}</span>
+          <span className="chip">Last 24h duplicate emails sent: {guardrailHealth.duplicateEmailsSent}</span>
+        </div>
         <div className="chips" style={{ marginTop: "12px" }}>
           <form action={sendGuardrailTestEmail}>
             <button className="chip" type="submit">Send test guardrail email</button>

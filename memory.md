@@ -92,6 +92,7 @@ Last updated: 2026-03-03
 
 ## Admin Workflow
 - `/admin/stories` now surfaces recent top-story duplicate guardrail alerts with pair-level context and one-click merge/demote actions.
+- `/admin/stories` now surfaces last-24h guardrail health counters (gate runs, premerge merged/suggested, duplicate pairs/alerts, demotions, duplicate emails sent) for quick system status checks.
 - `/admin/stories` includes a "Send test guardrail email" action and shows last test status (sent/failed) so SMTP can be verified on demand.
 
 ## Pipeline Notes
@@ -149,3 +150,4 @@ Last updated: 2026-03-03
 - 2026-03-03: Added an admin guardrails panel for duplicate-pair alerts so editors can immediately merge or demote flagged top-story pairs without manual DB inspection.
 - 2026-03-03: Added optional SMTP notifications for duplicate top-story guardrail alerts (`top_story_duplicate_pairs`) with cooldown and fingerprint dedupe; ingest fails open if email sending fails.
 - 2026-03-03: Added an admin one-click SMTP test email action and last-test status display on `/admin/stories` to validate guardrail email configuration.
+- 2026-03-03: Added lightweight 24-hour guardrail health counters to `/admin/stories` so operators can quickly see if sorting/merge guardrails are healthy without digging into DB logs.
