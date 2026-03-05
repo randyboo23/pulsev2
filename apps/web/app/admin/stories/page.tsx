@@ -7,7 +7,8 @@ import {
   mergeStory,
   hideInternational,
   demoteStory,
-  sendGuardrailTestEmail
+  sendGuardrailTestEmail,
+  sendTopStoryLinkedInDraftEmail
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -645,6 +646,11 @@ export default async function AdminStoriesPage() {
           <form action={sendGuardrailTestEmail}>
             <button className="admin-action admin-action-secondary" type="submit">
               Send test guardrail email
+            </button>
+          </form>
+          <form action={sendTopStoryLinkedInDraftEmail}>
+            <button className="admin-action admin-action-secondary" type="submit">
+              Send top-story LinkedIn draft
             </button>
           </form>
         </div>
