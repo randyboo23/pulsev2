@@ -24,6 +24,7 @@ export type RankingBreakdown = {
   authorityMultiplier: number;
   evergreenPenalty: number;
   singletonPenalty: number;
+  singleSourcePenalty: number;
   thinCoveragePenalty: number;
   hardNewsPenalty: number;
   lowNewsFeature: boolean;
@@ -199,6 +200,13 @@ const INSTRUCTIONAL_HINTS = [
   "for teachers"
 ];
 
+const SOURCE_DIVERSITY_WEIGHT = 1.05;
+const SINGLE_SOURCE_IMPORTANCE_URGENCY = 2;
+const SINGLE_SOURCE_IMPORTANCE_IMPACT = 2;
+const SINGLE_SOURCE_IMPORTANCE_POLICY = 2;
+const SINGLE_SOURCE_SOFT_PENALTY_AUTHORITY = 0.9;
+const SINGLE_SOURCE_SOFT_PENALTY_LOW_AUTHORITY = 0.85;
+
 function countHits(text: string, terms: string[]) {
   const lowered = text.toLowerCase();
   return terms.reduce((count, term) => (lowered.includes(term) ? count + 1 : count), 0);
@@ -261,6 +269,20 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const lowAuthoritySingleton =
     sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.75 : 1;
+  const importantSingleSource =
+    sourceCount <= 1 &&
+    (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY ||
+      impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT ||
+      (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY && recentCount >= 1));
+  const singleSourcePenalty =
+    !urgencyOverride &&
+    sourceCount <= 1 &&
+    storyType !== "breaking" &&
+    !importantSingleSource
+      ? authorityMultiplier >= 1
+        ? SINGLE_SOURCE_SOFT_PENALTY_AUTHORITY
+        : SINGLE_SOURCE_SOFT_PENALTY_LOW_AUTHORITY
+      : 1;
   const thinCoveragePenalty =
     !urgencyOverride &&
     storyType !== "breaking" &&
@@ -283,7 +305,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     novelty * 1.0 +
     relevance * 1.3 +
     volume * 0.9 +
-    sourceDiversity * 0.7 +
+    sourceDiversity * SOURCE_DIVERSITY_WEIGHT +
     recency;
 
   const score =
@@ -291,6 +313,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     authorityMultiplier *
     evergreenPenalty *
     singletonPenalty *
+    singleSourcePenalty *
     thinCoveragePenalty *
     hardNewsPenalty;
 
@@ -331,6 +354,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
       authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
       singletonPenalty: Number(singletonPenalty.toFixed(2)),
+      singleSourcePenalty: Number(singleSourcePenalty.toFixed(2)),
       thinCoveragePenalty: Number(thinCoveragePenalty.toFixed(2)),
       hardNewsPenalty: Number(hardNewsPenalty.toFixed(2)),
       lowNewsFeature,

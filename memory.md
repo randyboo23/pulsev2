@@ -42,6 +42,7 @@ Last updated: 2026-03-05
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - Top-story diversity now enforces max one story per state by default (and one per state+topic), with an override for strong-coverage stories (>=3 sources), while keeping pinned/urgency-override exceptions.
 - Top-story selection now uses audience-bucket mix guards (`teachers`, `admins`, `edtech`) in the first top-10 pass to avoid single-source saturation in any one content lane.
+- Ranking now gives stronger weight to source diversity and applies a soft single-source penalty for non-urgent stories, while exempting urgent/high-impact single-source developments.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
 - Ingest now runs a post-rank top-story duplicate audit (top 10) and emits `top_story_duplicate_pairs:N` guardrail alerts when same-event pairs still appear.
@@ -163,3 +164,4 @@ Last updated: 2026-03-05
 - 2026-03-05: Added automated LinkedIn draft email alerts in ingest for top-ranked stories meeting coverage threshold (default top 10 with >=3 sources), using existing SMTP config and one-send-per-story dedupe via `admin_events`.
 - 2026-03-05: Added manual admin action to send a LinkedIn draft email on demand for the highest-source current top story, using the same SMTP delivery path.
 - 2026-03-05: Added reusable admin submit feedback controls (`Working...` then `Done`) across Stories/Feeds/Sources/Login to reduce uncertainty after button clicks.
+- 2026-03-05: Tuned ranking to increase multi-source signal and down-rank low-importance single-source stories, while keeping exceptions for urgent/high-impact single-source coverage.
