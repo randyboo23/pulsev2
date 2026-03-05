@@ -2568,25 +2568,16 @@ async function loadFeedRegistry() {
       row.url = replacement.url;
       row.feed_type = replacement.feedType;
     }
-
-    return existing.rows
-      .filter((row) => row.is_active)
-      .map((row) => ({
-        id: row.id as string,
-        url: row.url as string,
-        sourceName: (row.source_name as string) ?? "Unknown",
-        domain: (row.domain as string) ?? "",
-        tier: (row.tier as "A" | "B" | "C" | "unknown") ?? "unknown",
-        isActive: row.is_active as boolean,
-        feedType: (row.feed_type as "rss" | "discovery" | "scrape") ?? "rss"
-      }));
   }
 
   const defaults = getDefaultFeeds(7);
+  const existingUrls = new Set(existing.rows.map((row) => String(row.url ?? "")));
   for (const feed of defaults) {
+    if (existingUrls.has(feed.url)) continue;
     const sourceId = await ensureSource(feed.sourceName, feed.domain, feed.tier);
     if (!sourceId) continue;
     await ensureFeed(feed.url, sourceId, feed.feedType ?? "rss");
+    existingUrls.add(feed.url);
   }
 
   const seeded = await pool.query(
