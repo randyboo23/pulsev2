@@ -463,8 +463,9 @@ const TOP_STATE_DIVERSITY_WINDOW = 10;
 const TOP_STATE_STORY_LIMIT = 1;
 const TOP_STATE_TOPIC_LIMIT = 1;
 const TOP_STATE_MULTI_SOURCE_OVERRIDE = 3;
-const TOP_POLICY_MIX_WINDOW = 10;
-const TOP_POLICY_MIX_SINGLE_SOURCE_THRESHOLD = 1;
+const TOP_AUDIENCE_MIX_WINDOW = 10;
+const TOP_AUDIENCE_SINGLE_SOURCE_THRESHOLD = 1;
+const TOP_AUDIENCE_SINGLE_SOURCE_LIMIT = 1;
 
 const STATE_GEO_ALIASES: Record<string, string[]> = {
   alabama: ["alabama"],
@@ -542,6 +543,7 @@ type StoryTopicCandidate = Pick<StoryRow, "id" | "title" | "editor_title">;
 type StoryTopicTokenCache = Map<string, string[]>;
 type StoryGeoStateCache = Map<string, string | null>;
 type StoryGeoTopicCache = Map<string, string>;
+type StoryAudienceBucketCache = Map<string, Audience[]>;
 type StoryTopicOverlapDetails = {
   ratio: number;
   sharedTokens: number;
@@ -804,10 +806,49 @@ function passesTopStateDiversityGuard(
   return true;
 }
 
-function isSingleSourcePolicyStory(story: StoryRow) {
-  if (story.status === "pinned" || story.lead_urgency_override) return false;
-  if (story.story_type !== "policy") return false;
-  return Math.max(0, Number(story.source_count ?? 0)) <= TOP_POLICY_MIX_SINGLE_SOURCE_THRESHOLD;
+function inferStoryAudienceBuckets(story: StoryRow, cache: StoryAudienceBucketCache) {
+  const cached = cache.get(story.id);
+  if (cached) return cached;
+
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  const summary = String(story.editor_summary ?? story.summary ?? "").trim();
+  const text = `${title} ${summary}`.trim();
+  const buckets: Audience[] = (["teachers", "admins", "edtech"] as const).filter((audience) =>
+    storyMatchesAudience(text, audience)
+  );
+  cache.set(story.id, buckets);
+  return buckets;
+}
+
+function passesSingleSourceAudienceMixGuard(
+  story: StoryRow,
+  selected: StoryRow[],
+  audienceCache: StoryAudienceBucketCache
+) {
+  if (selected.length >= TOP_AUDIENCE_MIX_WINDOW) return true;
+  if (story.status === "pinned" || story.lead_urgency_override) return true;
+
+  const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+  if (sourceCount > TOP_AUDIENCE_SINGLE_SOURCE_THRESHOLD) return true;
+
+  const candidateBuckets = inferStoryAudienceBuckets(story, audienceCache);
+  if (candidateBuckets.length === 0) return true;
+
+  const windowStories = selected.slice(0, TOP_AUDIENCE_MIX_WINDOW);
+  for (const bucket of candidateBuckets) {
+    const sameBucketSingleSourceCount = windowStories.filter((candidate) => {
+      const candidateSourceCount = Math.max(0, Number(candidate.source_count ?? 0));
+      if (candidateSourceCount > TOP_AUDIENCE_SINGLE_SOURCE_THRESHOLD) return false;
+      const candidateBuckets = inferStoryAudienceBuckets(candidate, audienceCache);
+      return candidateBuckets.includes(bucket);
+    }).length;
+
+    if (sameBucketSingleSourceCount >= TOP_AUDIENCE_SINGLE_SOURCE_LIMIT) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function applyTopicSimilarityPenalty(stories: StoryRow[]) {
@@ -848,6 +889,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
   const cache: StoryTopicTokenCache = new Map();
   const stateCache: StoryGeoStateCache = new Map();
   const topicCache: StoryGeoTopicCache = new Map();
+  const audienceCache: StoryAudienceBucketCache = new Map();
 
   const pinned = stories.filter((story) => story.status === "pinned").sort((a, b) => b.score - a.score);
   for (const story of pinned) {
@@ -860,7 +902,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
 
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
-    if (selected.length < TOP_POLICY_MIX_WINDOW && isSingleSourcePolicyStory(story)) continue;
+    if (!passesSingleSourceAudienceMixGuard(story, selected, audienceCache)) continue;
     if (!passesTopStateDiversityGuard(story, selected, stateCache, topicCache)) continue;
     if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     const overlap = maxStoryTopicOverlap(story, selected, cache);

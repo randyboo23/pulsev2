@@ -41,7 +41,7 @@ Last updated: 2026-03-05
 - Similar-story merge now requires at least one non-generic shared token for weak overlaps, and blocks high-overlap merges that only share generic/legal-action tokens.
 - Top-story same-event suppression now mirrors that non-generic-token rule and uses a stricter novelty override to reduce duplicate top-slot coverage.
 - Top-story diversity now enforces max one story per state by default (and one per state+topic), with an override for strong-coverage stories (>=3 sources), while keeping pinned/urgency-override exceptions.
-- Top-story selection now deprioritizes single-source policy stories in the first top-10 pass so non-policy stories can surface when available.
+- Top-story selection now uses audience-bucket mix guards (`teachers`, `admins`, `edtech`) in the first top-10 pass to avoid single-source saturation in any one content lane.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
 - Ingest now runs a post-rank top-story duplicate audit (top 10) and emits `top_story_duplicate_pairs:N` guardrail alerts when same-event pairs still appear.
@@ -156,4 +156,4 @@ Last updated: 2026-03-05
 - 2026-03-03: Added lightweight 24-hour guardrail health counters to `/admin/stories` so operators can quickly see if sorting/merge guardrails are healthy without digging into DB logs.
 - 2026-03-03: Reworked `/admin/stories` into editor-first sections (`Top 10`, `Next 10 watchlist`, `All other stories`) while keeping existing merge/status actions unchanged.
 - 2026-03-03: Improved `/admin/stories` readability and affordance: metric cards replaced chip-like stat rows, action buttons are visually distinct from static badges, and advanced/rare actions were collapsed to reduce button clutter.
-- 2026-03-05: Updated top-story diversity rules: default max one story per state with source-count override (>=3), and first-pass top-10 mix now deprioritizes single-source policy stories while still allowing them as fallback when alternatives are thin.
+- 2026-03-05: Updated top-story diversity rules: default max one story per state with source-count override (>=3), and generalized first-pass top-10 mix guard using audience buckets (`teachers`, `admins`, `edtech`) so any single-source lane can be diversified (policy, edtech, etc.) before fallback fills.
