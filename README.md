@@ -29,6 +29,7 @@ Techmeme for US K-12 education news.
 - Curated source registry with tier/weight controls.
 - RSS + scrape ingestion with canonical URL normalization.
 - Deterministic ingest quality gate with per-article quality labels (`article` / `uncertain` / `non_article`).
+- Static/taxonomy candidate guardrail: non-story titles/URLs (e.g. policy/privacy/work-with-us/grade-level index pages) are filtered from ranking and classified as `non_article` during ingest quality scans.
 - Summary adjudication layer that compares candidate summaries (`existing` / `scrape` / `llm`) and stores winner + confidence + reason codes.
 - Story brief guardrails: anti-headline-echo checks, deterministic fallback briefs, and section-index URL filtering.
 - Weak RSS summaries can be upgraded via bounded scrape enrichment (when `FIRECRAWL_API_KEY` is set), across feed types.
@@ -97,6 +98,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
+- Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
 - Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
 - What it does:
   - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),

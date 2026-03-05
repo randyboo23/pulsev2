@@ -6,6 +6,7 @@ import {
   type Audience,
   type StoryType
 } from "./ranking";
+import { isLikelyNonStoryTitle } from "./story-quality";
 
 function normalizeTitleCase(title: string) {
   const trimmed = title.trim();
@@ -1278,6 +1279,7 @@ export async function getTopStories(
     .filter((row) => {
       const title = String(row.editor_title ?? row.title ?? "").trim();
       if (!title) return false;
+      if (isLikelyNonStoryTitle(title)) return false;
       if (/^from\s+/i.test(title)) return false;
       if (/^(news|opinion|podcast|video)\s*\|/i.test(title)) return false;
       if (REJECT_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return false;

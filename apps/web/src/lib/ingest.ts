@@ -14,6 +14,7 @@ import {
   inferGeoTopicFromTitle,
   refreshHomepageRanks
 } from "./stories";
+import { isLikelyNonStoryTitle, isLikelyNonStoryUrl } from "./story-quality";
 import { sendSmtpTextEmail } from "./smtp";
 
 const parser = new Parser({
@@ -846,7 +847,9 @@ function classifyArticleQuality(params: {
   }
 
   const hasNonArticlePath = NON_ARTICLE_PATH_PATTERNS.some((pattern) => pattern.test(pathname));
+  const hasNonStoryUrlPath = isLikelyNonStoryUrl(params.url);
   const hasArticlePathHint = ARTICLE_PATH_HINT_PATTERNS.some((pattern) => pattern.test(pathname));
+  const hasNonStoryTitle = isLikelyNonStoryTitle(title);
   const hasBiographyText = BIOGRAPHY_TEXT_PATTERNS.some((pattern) => pattern.test(text));
   const hasPromoText = PROMOTIONAL_TEXT_PATTERNS.some((pattern) => pattern.test(text));
   const hasSectionTitle = looksLikeSectionTitle(title);
@@ -856,6 +859,14 @@ function classifyArticleQuality(params: {
   if (hasNonArticlePath) {
     score -= 0.55;
     reasons.push("non_article_url_path");
+  }
+  if (hasNonStoryUrlPath) {
+    score -= 0.6;
+    reasons.push("non_story_url_path");
+  }
+  if (hasNonStoryTitle) {
+    score -= 0.65;
+    reasons.push("non_story_title_pattern");
   }
   if (hasArticlePathHint) {
     score += 0.2;
@@ -905,6 +916,14 @@ function classifyArticleQuality(params: {
   }
   if (title.length >= 32 && !personNameTitle) {
     score += 0.08;
+  }
+
+  if ((hasNonArticlePath || hasNonStoryUrlPath || hasNonStoryTitle) && !hasArticlePathHint) {
+    return {
+      label: "non_article",
+      score: 0.06,
+      reasons: Array.from(new Set(reasons))
+    };
   }
 
   if (hasNonArticlePath && (hasBiographyText || personNameTitle)) {

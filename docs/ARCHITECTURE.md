@@ -47,6 +47,7 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
     |                                relevance, source authority, recency, volume)
     |                                penalties: evergreen, singleton, thin coverage, hard news gate,
     |                                plus alias-aware title-topic similarity penalty for same-event repeats
+    |                                candidate-quality gate removes static/taxonomy story titles before scoring
     |                                manual status overrides: pinned prioritized, hidden excluded, demoted deferred
     |                                final top-20 event-cluster cap keeps one story per event unless novelty signal is strong
     |
