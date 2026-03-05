@@ -1208,6 +1208,29 @@ a:hover {
   background: var(--paper);
 }
 
+.admin-submit-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-submit-confirm {
+  min-height: 1em;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faded);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.admin-submit-confirm.is-visible {
+  opacity: 1;
+  color: #2d8a4e;
+}
+
 .admin-inline-note {
   font-family: var(--font-ui);
   font-size: 11px;

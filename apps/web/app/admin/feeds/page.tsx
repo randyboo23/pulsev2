@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
+import AdminSubmitButton from "@/src/components/AdminSubmitButton";
 import { updateFeed, resetFeedFailures } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -99,12 +100,16 @@ export default async function AdminFeedsPage() {
                   />
                   Active
                 </label>
-                <button className="filter" type="submit">Save</button>
+                <AdminSubmitButton className="filter" pendingLabel="Saving..." successLabel="Saved">
+                  Save
+                </AdminSubmitButton>
               </form>
 
               <form action={resetFeedFailures} className="story-list" style={{ marginTop: "8px" }}>
                 <input type="hidden" name="id" value={feed.id} />
-                <button className="filter" type="submit">Reset failures</button>
+                <AdminSubmitButton className="filter" pendingLabel="Resetting..." successLabel="Reset">
+                  Reset failures
+                </AdminSubmitButton>
               </form>
             </div>
           ))}

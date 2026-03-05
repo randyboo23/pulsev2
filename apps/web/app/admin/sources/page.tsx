@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
+import AdminSubmitButton from "@/src/components/AdminSubmitButton";
 import { updateSource } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -73,7 +74,9 @@ export default async function AdminSourcesPage() {
                   defaultValue={source.weight}
                   style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--border)" }}
                 />
-                <button className="filter" type="submit">Save</button>
+                <AdminSubmitButton className="filter" pendingLabel="Saving..." successLabel="Saved">
+                  Save
+                </AdminSubmitButton>
               </form>
             </div>
           ))}

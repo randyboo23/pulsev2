@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
 import { getTopStories } from "@/src/lib/stories";
+import AdminSubmitButton from "@/src/components/AdminSubmitButton";
 import {
   updateStory,
   mergeStory,
@@ -557,15 +558,21 @@ export default async function AdminStoriesPage() {
             rows={3}
             style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
           />
-          <button className="admin-action" type="submit">Save</button>
+          <AdminSubmitButton className="admin-action" pendingLabel="Saving..." successLabel="Saved">
+            Save
+          </AdminSubmitButton>
         </form>
 
         <div className="admin-action-row" style={{ marginTop: "8px" }}>
           <form action={demoteStory}>
             <input type="hidden" name="id" value={story.id} />
-            <button className="admin-action admin-action-secondary" type="submit">
+            <AdminSubmitButton
+              className="admin-action admin-action-secondary"
+              pendingLabel="Demoting..."
+              successLabel="Demoted"
+            >
               Demote on homepage
-            </button>
+            </AdminSubmitButton>
           </form>
         </div>
 
@@ -574,9 +581,13 @@ export default async function AdminStoriesPage() {
           <div className="story-list" style={{ gap: "8px", marginTop: "8px" }}>
             <form action={hideInternational}>
               <input type="hidden" name="id" value={story.id} />
-              <button className="admin-action admin-action-secondary" type="submit">
+              <AdminSubmitButton
+                className="admin-action admin-action-secondary"
+                pendingLabel="Hiding..."
+                successLabel="Hidden"
+              >
                 Hide as international
-              </button>
+              </AdminSubmitButton>
             </form>
 
             <form action={mergeStory} className="story-list">
@@ -589,7 +600,13 @@ export default async function AdminStoriesPage() {
                 list="story-ids"
                 style={{ padding: "8px", borderRadius: "8px", border: "1px solid var(--rule)" }}
               />
-              <button className="admin-action admin-action-secondary" type="submit">Merge</button>
+              <AdminSubmitButton
+                className="admin-action admin-action-secondary"
+                pendingLabel="Merging..."
+                successLabel="Merged"
+              >
+                Merge
+              </AdminSubmitButton>
             </form>
           </div>
         </details>
@@ -644,14 +661,22 @@ export default async function AdminStoriesPage() {
         </div>
         <div className="admin-action-row" style={{ marginTop: "12px" }}>
           <form action={sendGuardrailTestEmail}>
-            <button className="admin-action admin-action-secondary" type="submit">
+            <AdminSubmitButton
+              className="admin-action admin-action-secondary"
+              pendingLabel="Sending..."
+              successLabel="Sent"
+            >
               Send test guardrail email
-            </button>
+            </AdminSubmitButton>
           </form>
           <form action={sendTopStoryLinkedInDraftEmail}>
-            <button className="admin-action admin-action-secondary" type="submit">
+            <AdminSubmitButton
+              className="admin-action admin-action-secondary"
+              pendingLabel="Sending..."
+              successLabel="Sent"
+            >
               Send top-story LinkedIn draft
-            </button>
+            </AdminSubmitButton>
           </form>
         </div>
         <div className="admin-inline-note">
@@ -713,18 +738,26 @@ export default async function AdminStoriesPage() {
                       <form action={mergeStory}>
                         <input type="hidden" name="source_id" value={sourceId} />
                         <input type="hidden" name="target_id" value={targetId} />
-                        <button className="admin-action" type="submit">
+                        <AdminSubmitButton
+                          className="admin-action"
+                          pendingLabel="Merging..."
+                          successLabel="Merged"
+                        >
                           Merge (Recommended): #{sourceRank} into #{targetRank}
-                        </button>
+                        </AdminSubmitButton>
                       </form>
                       <div className="meta">
                         Recommended merge target is #{targetRank} because it is ranked higher on the homepage.
                       </div>
                       <form action={demoteStory}>
                         <input type="hidden" name="id" value={sourceId} />
-                        <button className="admin-action admin-action-secondary" type="submit">
+                        <AdminSubmitButton
+                          className="admin-action admin-action-secondary"
+                          pendingLabel="Demoting..."
+                          successLabel="Done"
+                        >
                           Move lower story down (#{sourceRank})
-                        </button>
+                        </AdminSubmitButton>
                       </form>
                       <div className="meta">
                         Use this if they are related but not truly the same event.
@@ -792,14 +825,22 @@ export default async function AdminStoriesPage() {
           <summary className="admin-link">Advanced maintenance actions</summary>
           <div className="admin-action-row" style={{ marginTop: "10px" }}>
             <form action="/api/admin/cleanup-international" method="post">
-              <button className="admin-action admin-action-secondary" type="submit">
+              <AdminSubmitButton
+                className="admin-action admin-action-secondary"
+                pendingLabel="Running..."
+                successLabel="Done"
+              >
                 Re-run international cleanup
-              </button>
+              </AdminSubmitButton>
             </form>
             <form action="/api/admin/generate-summaries" method="post">
-              <button className="admin-action admin-action-secondary" type="submit">
+              <AdminSubmitButton
+                className="admin-action admin-action-secondary"
+                pendingLabel="Running..."
+                successLabel="Done"
+              >
                 Backfill story briefs (manual)
-              </button>
+              </AdminSubmitButton>
             </form>
           </div>
         </details>
@@ -822,9 +863,13 @@ export default async function AdminStoriesPage() {
                 <form action={mergeStory} className="story-list">
                   <input type="hidden" name="source_id" value={pair.source.id} />
                   <input type="hidden" name="target_id" value={pair.target.id} />
-                  <button className="admin-action" type="submit">
+                  <AdminSubmitButton
+                    className="admin-action"
+                    pendingLabel="Merging..."
+                    successLabel="Merged"
+                  >
                     Merge into stronger story
-                  </button>
+                  </AdminSubmitButton>
                 </form>
               </div>
             ))}

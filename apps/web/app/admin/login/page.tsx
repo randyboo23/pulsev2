@@ -1,6 +1,7 @@
 import { adminCookieValue, adminCookieName } from "@/src/lib/admin";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import AdminSubmitButton from "@/src/components/AdminSubmitButton";
 
 export default function AdminLoginPage({
   searchParams
@@ -24,7 +25,9 @@ export default function AdminLoginPage({
             placeholder="Admin secret"
             style={{ padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}
           />
-          <button className="filter" type="submit">Sign in</button>
+          <AdminSubmitButton className="filter" pendingLabel="Signing in..." successLabel="Done">
+            Sign in
+          </AdminSubmitButton>
           {searchParams?.error ? (
             <span style={{ color: "var(--accent-2)", fontSize: "12px" }}>Invalid secret</span>
           ) : null}

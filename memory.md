@@ -99,6 +99,7 @@ Last updated: 2026-03-05
 - `/admin/stories` now uses scan-friendly metric cards for guardrail stats, explicit action buttons for clickable controls, and collapses low-frequency actions (`hide`, maintenance jobs) into "More actions" areas.
 - `/admin/stories` now includes a one-click "Send top-story LinkedIn draft" action that emails a copy/paste post for the highest-source story in the current top-story window.
 - Ingest now can send LinkedIn-ready draft emails (copy/paste text) when a top-ranked story meets a minimum source threshold (default `>=3`), with one-send-per-story dedupe.
+- Admin submit buttons now show inline pending + short success confirmation states so editors can tell actions were triggered without leaving the page.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
@@ -161,3 +162,4 @@ Last updated: 2026-03-05
 - 2026-03-05: Updated top-story diversity rules: default max one story per state with source-count override (>=3), and generalized first-pass top-10 mix guard using audience buckets (`teachers`, `admins`, `edtech`) so any single-source lane can be diversified (policy, edtech, etc.) before fallback fills.
 - 2026-03-05: Added automated LinkedIn draft email alerts in ingest for top-ranked stories meeting coverage threshold (default top 10 with >=3 sources), using existing SMTP config and one-send-per-story dedupe via `admin_events`.
 - 2026-03-05: Added manual admin action to send a LinkedIn draft email on demand for the highest-source current top story, using the same SMTP delivery path.
+- 2026-03-05: Added reusable admin submit feedback controls (`Working...` then `Done`) across Stories/Feeds/Sources/Login to reduce uncertainty after button clicks.
