@@ -1008,6 +1008,13 @@ function hasStoredHomepageRank(stories: StoryRow[]) {
   return stories.some((story) => Number.isFinite(story.homepage_rank ?? NaN));
 }
 
+function isOpinionLikeStory(story: StoryRow) {
+  if (story.status === "pinned") return false;
+  if (story.story_type === "opinion") return true;
+  const title = String(story.editor_title ?? story.title ?? "").trim();
+  return /^opinion\s*[:\-]/i.test(title);
+}
+
 function orderStoriesByStoredRank(stories: StoryRow[]) {
   const withRank = stories
     .filter((story) => Number.isFinite(story.homepage_rank ?? NaN))
@@ -1401,6 +1408,7 @@ export async function getTopStories(
 
   const demotedStories = finalSet
     .filter((story) => story.status === "demoted")
+    .filter((story) => !isOpinionLikeStory(story))
     .sort((a, b) => b.score - a.score);
   const withDemotedFallback = (stories: StoryRow[]) => {
     if (stories.length >= limit || demotedStories.length === 0) {
@@ -1413,11 +1421,15 @@ export async function getTopStories(
   };
 
   if (useStoredRank && hasStoredHomepageRank(finalSet)) {
-    const ordered = orderStoriesByStoredRank(finalSet).filter((story) => story.status !== "demoted");
+    const ordered = orderStoriesByStoredRank(finalSet)
+      .filter((story) => story.status !== "demoted")
+      .filter((story) => !isOpinionLikeStory(story));
     return dedupeStorySummariesForDisplay(withDemotedFallback(ordered));
   }
 
-  const rankingPool = finalSet.filter((story) => story.status !== "demoted");
+  const rankingPool = finalSet
+    .filter((story) => story.status !== "demoted")
+    .filter((story) => !isOpinionLikeStory(story));
   const pinned = rankingPool.filter((story) => story.status === "pinned");
   const rest = rankingPool.filter((story) => story.status !== "pinned");
 
