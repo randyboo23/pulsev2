@@ -123,6 +123,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `TOP_STORY_PUBLISH_GATE_STATE_MISMATCH_MIN` (default `2`)
   - `TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN` (default `2`)
   - `TOP_STORY_PUBLISH_GATE_STATE_LIMIT` (default `1`)
+  - `TOP_STORY_PUBLISH_GATE_STATE_OVERRIDE_SOURCE_COUNT` (default `3`; allows additional same-state top stories when source count meets threshold)
   - `TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT` (default `1`)
   - `TOP_STORY_PUBLISH_GATE_STALE_TOP3_HOURS` (default `48`)
   - `TOP_STORY_PUBLISH_GATE_STALE_TOP10_HOURS` (default `72`)

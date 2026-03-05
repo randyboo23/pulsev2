@@ -460,8 +460,11 @@ const STORY_TOPIC_STRONG_PENALTY = 0.62;
 const STORY_EVENT_CLUSTER_THRESHOLD = 0.3;
 const TOP_EVENT_CLUSTER_LIMIT = 20;
 const TOP_STATE_DIVERSITY_WINDOW = 10;
-const TOP_STATE_STORY_LIMIT = 2;
+const TOP_STATE_STORY_LIMIT = 1;
 const TOP_STATE_TOPIC_LIMIT = 1;
+const TOP_STATE_MULTI_SOURCE_OVERRIDE = 3;
+const TOP_POLICY_MIX_WINDOW = 10;
+const TOP_POLICY_MIX_SINGLE_SOURCE_THRESHOLD = 1;
 
 const STATE_GEO_ALIASES: Record<string, string[]> = {
   alabama: ["alabama"],
@@ -783,10 +786,12 @@ function passesTopStateDiversityGuard(
 
   const state = inferStoryState(story, stateCache);
   if (!state) return true;
+  const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+  const hasCoverageOverride = sourceCount >= TOP_STATE_MULTI_SOURCE_OVERRIDE;
 
   const windowStories = selected.slice(0, TOP_STATE_DIVERSITY_WINDOW);
   const sameState = windowStories.filter((candidate) => inferStoryState(candidate, stateCache) === state);
-  if (sameState.length >= TOP_STATE_STORY_LIMIT) return false;
+  if (!hasCoverageOverride && sameState.length >= TOP_STATE_STORY_LIMIT) return false;
 
   const topic = inferStoryTopicBucket(story, topicCache);
   if (topic === "general") return true;
@@ -794,9 +799,15 @@ function passesTopStateDiversityGuard(
   const sameStateTopicCount = sameState.filter(
     (candidate) => inferStoryTopicBucket(candidate, topicCache) === topic
   ).length;
-  if (sameStateTopicCount >= TOP_STATE_TOPIC_LIMIT) return false;
+  if (!hasCoverageOverride && sameStateTopicCount >= TOP_STATE_TOPIC_LIMIT) return false;
 
   return true;
+}
+
+function isSingleSourcePolicyStory(story: StoryRow) {
+  if (story.status === "pinned" || story.lead_urgency_override) return false;
+  if (story.story_type !== "policy") return false;
+  return Math.max(0, Number(story.source_count ?? 0)) <= TOP_POLICY_MIX_SINGLE_SOURCE_THRESHOLD;
 }
 
 function applyTopicSimilarityPenalty(stories: StoryRow[]) {
@@ -849,6 +860,7 @@ function selectDiverseTopStories(stories: StoryRow[], limit: number) {
 
   for (const story of pool) {
     if (selected.length >= boundedLimit) break;
+    if (selected.length < TOP_POLICY_MIX_WINDOW && isSingleSourcePolicyStory(story)) continue;
     if (!passesTopStateDiversityGuard(story, selected, stateCache, topicCache)) continue;
     if (!passesTopEventClusterGuard(story, selected, cache)) continue;
     const overlap = maxStoryTopicOverlap(story, selected, cache);

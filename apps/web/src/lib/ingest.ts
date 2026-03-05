@@ -68,6 +68,12 @@ const TOP_STORY_PUBLISH_GATE_ENTITY_CONFLICT_MIN = envBoundedInt(
   6
 );
 const TOP_STORY_PUBLISH_GATE_STATE_LIMIT = envBoundedInt("TOP_STORY_PUBLISH_GATE_STATE_LIMIT", 1, 1, 4);
+const TOP_STORY_PUBLISH_GATE_STATE_OVERRIDE_SOURCE_COUNT = envBoundedInt(
+  "TOP_STORY_PUBLISH_GATE_STATE_OVERRIDE_SOURCE_COUNT",
+  3,
+  2,
+  12
+);
 const TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT = envBoundedInt(
   "TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT",
   1,
@@ -2749,6 +2755,7 @@ async function runTopStoriesPublishGatePass(): Promise<TopStoryPublishGatePassRe
     const stateTopicKey = `${state}:${topic}`;
     const stateTopicCount = stateTopicCounts.get(stateTopicKey) ?? 0;
     const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+    const hasStateCoverageOverride = sourceCount >= TOP_STORY_PUBLISH_GATE_STATE_OVERRIDE_SOURCE_COUNT;
     const recentCount = Math.max(0, Number(story.recent_count ?? 0));
     const latestAtRaw = new Date(story.latest_at).getTime();
     const hoursSinceLatest = Number.isFinite(latestAtRaw)
@@ -2760,9 +2767,10 @@ async function runTopStoriesPublishGatePass(): Promise<TopStoryPublishGatePassRe
 
     if (story.status !== "pinned") {
       let diversityReason: string | null = null;
-      if (stateCount >= TOP_STORY_PUBLISH_GATE_STATE_LIMIT) {
+      if (!hasStateCoverageOverride && stateCount >= TOP_STORY_PUBLISH_GATE_STATE_LIMIT) {
         diversityReason = `state_saturation:${state}`;
       } else if (
+        !hasStateCoverageOverride &&
         topic !== "general" &&
         stateTopicCount >= TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT
       ) {
@@ -2951,6 +2959,11 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
     demoted,
     publishLimit,
     scanLimit,
+    stateDiversity: {
+      maxStoriesPerState: TOP_STORY_PUBLISH_GATE_STATE_LIMIT,
+      maxStateTopicStories: TOP_STORY_PUBLISH_GATE_STATE_TOPIC_LIMIT,
+      sourceOverride: TOP_STORY_PUBLISH_GATE_STATE_OVERRIDE_SOURCE_COUNT
+    },
     topStoryPremerge: {
       enabled: TOP_STORY_PREMERGE_ENABLED,
       candidateLimit: TOP_STORY_PREMERGE_CANDIDATE_LIMIT,
