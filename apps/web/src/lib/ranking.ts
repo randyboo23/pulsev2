@@ -3,6 +3,7 @@ export type RankingInputs = {
   summary: string | null;
   articleCount: number;
   sourceCount?: number;
+  familyCount?: number;
   recentCount?: number;
   avgWeight: number;
   latestAt: Date;
@@ -19,6 +20,7 @@ export type RankingBreakdown = {
   hardNewsSignals: number;
   volume: number;
   sourceDiversity: number;
+  familyDiversity: number;
   recency: number;
   avgWeight: number;
   authorityMultiplier: number;
@@ -247,12 +249,16 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const hardNewsSignals = urgency + Math.min(policyHits, 1);
 
   const sourceCount = Number.isFinite(inputs.sourceCount ?? 0) ? Number(inputs.sourceCount ?? 0) : 0;
+  const familyCount = Number.isFinite(inputs.familyCount ?? 0) ? Number(inputs.familyCount ?? 0) : 0;
+  const independentSourceCount =
+    familyCount > 0 ? familyCount : sourceCount;
   const recentCount = Number.isFinite(inputs.recentCount ?? 0) ? Number(inputs.recentCount ?? 0) : 0;
   const volume = Math.log1p(inputs.articleCount);
   const sourceDiversity = Math.log1p(Math.max(0, sourceCount));
+  const familyDiversity = Math.log1p(Math.max(0, independentSourceCount));
   const hoursSince = (Date.now() - inputs.latestAt.getTime()) / (1000 * 60 * 60);
   const recency = 1.1 * Math.exp(-hoursSince / 30);
-  const weakEvergreenSignals = hoursSince > 18 && sourceCount <= 1 && recentCount <= 1;
+  const weakEvergreenSignals = hoursSince > 18 && independentSourceCount <= 1 && recentCount <= 1;
   const storyType = classifyStoryType({
     text,
     weakEvergreenSignals,
@@ -267,16 +273,16 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const baseWeight = Math.max(0.45, Math.min(1.5, inputs.avgWeight));
   const authorityMultiplier = Math.max(0.3, Math.min(2.2, Math.pow(baseWeight, 3)));
   const lowAuthoritySingleton =
-    sourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
+    independentSourceCount <= 1 && recentCount <= 1 && inputs.articleCount <= 1 && authorityMultiplier < 1;
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.75 : 1;
   const importantSingleSource =
-    sourceCount <= 1 &&
+    independentSourceCount <= 1 &&
     (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY ||
       impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT ||
       (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY && recentCount >= 1));
   const singleSourcePenalty =
     !urgencyOverride &&
-    sourceCount <= 1 &&
+    independentSourceCount <= 1 &&
     storyType !== "breaking" &&
     !importantSingleSource
       ? authorityMultiplier >= 1
@@ -286,7 +292,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const thinCoveragePenalty =
     !urgencyOverride &&
     storyType !== "breaking" &&
-    sourceCount <= 1 &&
+    independentSourceCount <= 1 &&
     recentCount <= 1 &&
     inputs.articleCount <= 1
       ? 0.82
@@ -295,7 +301,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     storyType === "feature" &&
     !urgencyOverride &&
     hardNewsSignals === 0 &&
-    sourceCount <= 2 &&
+    independentSourceCount <= 2 &&
     recentCount <= 1;
   const hardNewsPenalty = lowNewsFeature ? (authorityMultiplier >= 1 ? 0.6 : 0.45) : 1;
 
@@ -305,7 +311,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     novelty * 1.0 +
     relevance * 1.3 +
     volume * 0.9 +
-    sourceDiversity * SOURCE_DIVERSITY_WEIGHT +
+    (familyDiversity * SOURCE_DIVERSITY_WEIGHT + sourceDiversity * 0.35) +
     recency;
 
   const score =
@@ -349,6 +355,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
       hardNewsSignals,
       volume: Number(volume.toFixed(2)),
       sourceDiversity: Number(sourceDiversity.toFixed(2)),
+      familyDiversity: Number(familyDiversity.toFixed(2)),
       recency: Number(recency.toFixed(2)),
       avgWeight: Number(baseWeight.toFixed(2)),
       authorityMultiplier: Number(authorityMultiplier.toFixed(2)),

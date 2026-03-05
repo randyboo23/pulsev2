@@ -8,7 +8,9 @@ const rejectTitles = [
   "9-12 High School",
   "6-8 Middle School",
   "Terms of Use",
-  "Contact Us"
+  "Contact Us",
+  "North America",
+  "Politics & Policy"
 ];
 
 const allowTitles = [

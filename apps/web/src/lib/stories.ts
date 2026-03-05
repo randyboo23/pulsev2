@@ -7,6 +7,7 @@ import {
   type StoryType
 } from "./ranking";
 import { isLikelyNonStoryTitle } from "./story-quality";
+import { countSourceFamilies } from "./source-family";
 
 function normalizeTitleCase(title: string) {
   const trimmed = title.trim();
@@ -226,6 +227,7 @@ export type StoryRow = {
   last_seen_at: string;
   article_count: number;
   source_count: number;
+  source_family_count?: number;
   recent_count: number;
   avg_weight: number;
   latest_at: string;
@@ -1220,6 +1222,7 @@ export async function getTopStories(
       s.last_seen_at,
       count(sa.article_id) as article_count,
       count(distinct a.source_id) as source_count,
+      array_remove(array_agg(distinct src.domain), null) as source_domains,
       count(a.id) filter (where coalesce(a.published_at, a.fetched_at) >= now() - interval '24 hours') as recent_count,
       avg(coalesce(src.weight, 1.0)) as avg_weight,
       max(coalesce(a.published_at, a.fetched_at)) as latest_at,
@@ -1341,11 +1344,16 @@ export async function getTopStories(
 
       const resolvedSummary = editorSummary ?? autoSummary;
       const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
+      const sourceDomains = Array.isArray(row.source_domains)
+        ? (row.source_domains as Array<string | null | undefined>)
+        : [];
+      const sourceFamilyCount = countSourceFamilies(sourceDomains);
       const ranking = analyzeStoryRanking({
         title: row.editor_title ?? row.title,
         summary: resolvedSummary,
         articleCount: Number(row.article_count),
         sourceCount: Number(row.source_count),
+        familyCount: sourceFamilyCount,
         recentCount: Number(row.recent_count),
         avgWeight: Number(row.avg_weight),
         latestAt: new Date(row.latest_at)
@@ -1370,6 +1378,7 @@ export async function getTopStories(
         editor_summary: editorSummary,
         article_count: Number(row.article_count),
         source_count: Number(row.source_count),
+        source_family_count: sourceFamilyCount,
         recent_count: Number(row.recent_count),
         avg_weight: Number(row.avg_weight),
         score,

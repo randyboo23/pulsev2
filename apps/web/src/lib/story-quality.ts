@@ -8,6 +8,8 @@ const NON_STORY_TITLE_PATTERNS = [
   /^sitemap$/i,
   /^(?:all )?topics$/i,
   /^grade levels?$/i,
+  /^north america$/i,
+  /^politics\s*&\s*policy$/i,
   /^(?:pre[-\s]?k|pk|k|\d{1,2})\s*-\s*(?:\d{1,2}|12)\s+(?:primary|elementary|middle|high)\s+school$/i
 ];
 

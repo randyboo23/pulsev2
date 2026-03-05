@@ -1,4 +1,4 @@
-import { TRUSTED_SITES } from "@pulse/core";
+import { TRUSTED_SITES, SOURCE_TIERS } from "@pulse/core";
 
 export type FeedConfig = {
   name: string;
@@ -16,6 +16,13 @@ export type FeedEntry = {
 };
 
 const SITE_FILTER = TRUSTED_SITES.map((site) => `site:${site}`).join(" OR ");
+const NATIONAL_SITE_FILTER = (SOURCE_TIERS.tierA.national as readonly string[])
+  .map((site) => `site:${site}`)
+  .join(" OR ");
+const LOCAL_SITE_FILTER = (SOURCE_TIERS.tierA.localJournalism as readonly string[])
+  .slice(0, 18)
+  .map((site) => `site:${site}`)
+  .join(" OR ");
 
 const SEARCH_QUERIES: FeedConfig[] = [
   {
@@ -46,6 +53,16 @@ const SEARCH_QUERIES: FeedConfig[] = [
   {
     name: "General K-12",
     query: `"K-12 education" OR "public schools" OR "school districts" (${SITE_FILTER})`
+  },
+  {
+    name: "National Outlets",
+    query:
+      `"education" OR "schools" OR "school district" OR "education policy" (${NATIONAL_SITE_FILTER})`
+  },
+  {
+    name: "Local District Impact",
+    query:
+      `("school board" OR "school district" OR superintendent OR "state education") (${LOCAL_SITE_FILTER}) -sports -college`
   }
 ];
 

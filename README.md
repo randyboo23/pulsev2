@@ -48,6 +48,7 @@ Techmeme for US K-12 education news.
 - Ingest telemetry now reports mixed-cluster audit counters (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Top-story ranking now applies title-topic diversity suppression, semantic event-action normalization, and a top-20 event-cluster cap (with strict novelty override) to reduce same-event repeats.
+- Ranking now also uses source-family-aware diversity (independent publisher families) so syndicated/alias duplicates carry less weight than genuinely independent corroboration.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
 - Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
 - Hard-news gate now demotes low-newsworthiness feature clusters (single-source, low-urgency, non-policy) so instructional evergreen content does not float to top slots.
@@ -99,6 +100,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
+- Optional extra check: `npm run qa:source-family` (fixture-based source-family dedupe guardrail)
 - Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
 - What it does:
   - triggers `POST /api/ingest` against `http://localhost:3000` (or `QA_BASE_URL` if set),
@@ -136,6 +138,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `TOP_STORY_PREMERGE_SIMILARITY` (default `0.54`)
   - `TOP_STORY_DUPLICATE_AUDIT_LIMIT` (default `10`)
   - `TOP_STORY_DUPLICATE_AUDIT_SIMILARITY` (default `0.54`)
+  - `INGEST_MAX_DISCOVERY_ITEMS_PER_FEED` (default `40`; caps Google News discovery volume per query to control noise/cost)
   - `GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES` (default `60`, skips repeated same-pair alerts within cooldown)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_HOST` (default `smtp.gmail.com`)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_PORT` (default `465`)

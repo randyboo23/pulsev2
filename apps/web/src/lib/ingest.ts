@@ -358,6 +358,12 @@ function extractJson(raw: string): string {
 }
 
 const MAX_ITEMS_PER_FEED = 100;
+const MAX_ITEMS_PER_DISCOVERY_FEED = envBoundedInt(
+  "INGEST_MAX_DISCOVERY_ITEMS_PER_FEED",
+  40,
+  10,
+  100
+);
 const DOWNWEIGHT_PATTERNS = ["edtechinnovationhub", "ethi"];
 
 const US_INDICATORS = [
@@ -3533,7 +3539,8 @@ export async function ingestFeeds(): Promise<IngestResult> {
       continue;
     }
 
-    for (const item of parsed.items.slice(0, MAX_ITEMS_PER_FEED)) {
+    const perFeedLimit = feed.feedType === "discovery" ? MAX_ITEMS_PER_DISCOVERY_FEED : MAX_ITEMS_PER_FEED;
+    for (const item of parsed.items.slice(0, perFeedLimit)) {
       fetchedItems += 1;
       const rawItem = item as {
         contentSnippet?: string;

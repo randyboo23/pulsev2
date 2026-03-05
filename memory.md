@@ -43,6 +43,7 @@ Last updated: 2026-03-05
 - Top-story diversity now enforces max one story per state by default (and one per state+topic), with an override for strong-coverage stories (>=3 sources), while keeping pinned/urgency-override exceptions.
 - Top-story selection now uses audience-bucket mix guards (`teachers`, `admins`, `edtech`) in the first top-10 pass to avoid single-source saturation in any one content lane.
 - Ranking now gives stronger weight to source diversity and applies a soft single-source penalty for non-urgent stories, while exempting urgent/high-impact single-source developments.
+- Ranking now uses source-family-aware diversity (independent publisher families) for diversity boosts and single-source penalties, reducing syndication/alias inflation.
 - Top-story candidate quality now hard-filters static/taxonomy story titles (for example `Privacy Policy`, `Work with Us`, grade-band index titles) before ranking.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
@@ -167,3 +168,4 @@ Last updated: 2026-03-05
 - 2026-03-05: Added reusable admin submit feedback controls (`Working...` then `Done`) across Stories/Feeds/Sources/Login to reduce uncertainty after button clicks.
 - 2026-03-05: Tuned ranking to increase multi-source signal and down-rank low-importance single-source stories, while keeping exceptions for urgent/high-impact single-source coverage.
 - 2026-03-05: Added a shared story-quality gate for static/taxonomy candidates; ranking now excludes non-story titles pre-score and ingest quality classification marks matching URL/title patterns as `non_article`.
+- 2026-03-05: Added source-family normalization + ranking integration so independent family count influences story score/penalties; expanded discovery query mix with a per-discovery-feed item cap to increase source breadth while controlling ingest noise/cost.

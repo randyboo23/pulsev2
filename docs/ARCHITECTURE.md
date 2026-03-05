@@ -15,6 +15,7 @@ RSS Feeds + Google News Discovery
     v
 ingest.ts -- fetch feeds, normalize URLs, resolve redirects
     |          scrape feeds: free HTML link extraction first, Firecrawl fallback
+    |          discovery feed item cap limits per-query Google News volume
     |          Firecrawl 402/429 -> temporary backoff (ingest continues without it)
     |
     v
@@ -47,6 +48,7 @@ Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, pol
     |                                relevance, source authority, recency, volume)
     |                                penalties: evergreen, singleton, thin coverage, hard news gate,
     |                                plus alias-aware title-topic similarity penalty for same-event repeats
+    |                                source diversity uses independent source-family count (not just raw outlet count)
     |                                candidate-quality gate removes static/taxonomy story titles before scoring
     |                                manual status overrides: pinned prioritized, hidden excluded, demoted deferred
     |                                final top-20 event-cluster cap keeps one story per event unless novelty signal is strong
