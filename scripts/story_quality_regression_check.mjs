@@ -10,7 +10,8 @@ const rejectTitles = [
   "Terms of Use",
   "Contact Us",
   "North America",
-  "Politics & Policy"
+  "Politics & Policy",
+  "State of the Union"
 ];
 
 const allowTitles = [
@@ -24,7 +25,8 @@ const rejectUrls = [
   "https://www.chalkbeat.org/pages/privacy-policy/",
   "https://www.rand.org/services-and-impact/work-with-us.html",
   "https://www.edutopia.org/grade-level-9-12",
-  "https://example.com/terms-of-use"
+  "https://example.com/terms-of-use",
+  "https://www.brookings.edu/tags/state-of-the-union-2026/"
 ];
 
 const allowUrls = [

@@ -349,6 +349,8 @@ const TOPIC_DEDUPE_STOPWORDS = new Set([
   "lawmakers",
   "legislature",
   "session",
+  "union",
+  "unions",
   "state",
   "states"
 ]);
@@ -429,6 +431,7 @@ const TOPIC_GENERIC_CONTEXT_TOKENS = new Set([
   "education",
   "policy",
   "state",
+  "union",
   "board",
   "law",
   "bill",

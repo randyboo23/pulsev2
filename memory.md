@@ -45,6 +45,7 @@ Last updated: 2026-03-05
 - Ranking now gives stronger weight to source diversity and applies a soft single-source penalty for non-urgent stories, while exempting urgent/high-impact single-source developments.
 - Ranking now uses source-family-aware diversity (independent publisher families) for diversity boosts and single-source penalties, reducing syndication/alias inflation.
 - Top-story candidate quality now hard-filters static/taxonomy story titles (for example `Privacy Policy`, `Work with Us`, grade-band index titles) before ranking.
+- Non-story tag/index pages now include `State of the Union` and `/tags/` patterns, and mixed-story generic token handling now treats `union` as non-strong overlap in merge heuristics.
 - Ingest now runs a top-story publish gate before homepage rank persistence to auto-demote suspicious top-slot clusters (mixed-state/entity-conflict), overflow state/topic saturation, and stale/thin top-slot stories.
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool, then applies demotions only to unresolved low-quality/diversity/staleness cases.
 - Ingest now runs a post-rank top-story duplicate audit (top 10) and emits `top_story_duplicate_pairs:N` guardrail alerts when same-event pairs still appear.
@@ -169,3 +170,4 @@ Last updated: 2026-03-05
 - 2026-03-05: Tuned ranking to increase multi-source signal and down-rank low-importance single-source stories, while keeping exceptions for urgent/high-impact single-source coverage.
 - 2026-03-05: Added a shared story-quality gate for static/taxonomy candidates; ranking now excludes non-story titles pre-score and ingest quality classification marks matching URL/title patterns as `non_article`.
 - 2026-03-05: Added source-family normalization + ranking integration so independent family count influences story score/penalties; expanded discovery query mix with a per-discovery-feed item cap to increase source breadth while controlling ingest noise/cost.
+- 2026-03-05: Fixed bad generic merge case (`State of the Union`) by expanding non-story title/path guards (`/tags/`, exact title pattern), adding grouping regression coverage for generic `state+union` overlap, and applying a one-time live demotion/quality cleanup for the affected cluster.

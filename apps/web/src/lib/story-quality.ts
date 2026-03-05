@@ -10,6 +10,7 @@ const NON_STORY_TITLE_PATTERNS = [
   /^grade levels?$/i,
   /^north america$/i,
   /^politics\s*&\s*policy$/i,
+  /^(?:the\s+)?state of the union$/i,
   /^(?:pre[-\s]?k|pk|k|\d{1,2})\s*-\s*(?:\d{1,2}|12)\s+(?:primary|elementary|middle|high)\s+school$/i
 ];
 
@@ -21,6 +22,7 @@ const NON_STORY_PATH_PATTERNS = [
   /\/about-us(?:\/|$|\.)/i,
   /\/contact-us(?:\/|$|\.)/i,
   /\/sitemap(?:\/|$|\.)/i,
+  /\/tags?(?:\/|$|\.)/i,
   /\/grade-level(?:\/|-|$|\.)/i
 ];
 

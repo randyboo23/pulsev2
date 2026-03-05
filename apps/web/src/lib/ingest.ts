@@ -731,7 +731,7 @@ const NON_ARTICLE_PATH_PATTERNS = [
   /\/team(?:\/|$)/i,
   /\/experts?(?:\/|$)/i,
   /\/staff(?:\/|$)/i,
-  /\/tag(?:\/|$)/i,
+  /\/tags?(?:\/|$)/i,
   /\/category(?:\/|$)/i,
   /\/topic(?:s)?(?:\/|$)/i,
   /\/search(?:\/|$)/i

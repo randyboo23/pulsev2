@@ -77,6 +77,16 @@ const fixtures = [
     right: {
       title: "Supreme Court Sides with California Parents in Gender Identity Case"
     }
+  },
+  {
+    id: "no_merge_generic_state_union_overlap",
+    expectMerge: false,
+    left: {
+      title: "Trump touts ‘we ended DEI in America’ in State of the Union"
+    },
+    right: {
+      title: "Cal State Unions Push to Cap Executive Pay, Shield Raises for Organized Workers"
+    }
   }
 ];
 
