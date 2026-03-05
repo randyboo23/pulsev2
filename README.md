@@ -142,6 +142,10 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `GUARDRAIL_ALERT_EMAIL_FROM` (default SMTP user)
   - `GUARDRAIL_ALERT_EMAIL_TO` (comma-separated recipients; required to send email)
   - `GUARDRAIL_ALERT_EMAIL_EHLO` (default `pulsek12.com`)
+  - `LINKEDIN_TOP_STORY_EMAIL_ENABLED` (default `true`; set `false` to disable LinkedIn draft emails)
+  - `LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES` (default `3`)
+  - `LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT` (default `10`; scans top-ranked stories up to this slot)
+  - `LINKEDIN_TOP_STORY_EMAIL_MAX_SOURCE_NAMES` (default `3`; source names listed in generated post)
 
 ## One-Time Story Backfill Merge
 - Run from repo root to merge existing duplicate story clusters:

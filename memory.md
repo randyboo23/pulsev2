@@ -97,6 +97,7 @@ Last updated: 2026-03-05
 - `/admin/stories` includes a "Send test guardrail email" action and shows last test status (sent/failed) so SMTP can be verified on demand.
 - `/admin/stories` now separates stories into `Top 10`, `Next 10 watchlist`, and collapsible `All other stories` so editors can focus on homepage-impacting stories first.
 - `/admin/stories` now uses scan-friendly metric cards for guardrail stats, explicit action buttons for clickable controls, and collapses low-frequency actions (`hide`, maintenance jobs) into "More actions" areas.
+- Ingest now can send LinkedIn-ready draft emails (copy/paste text) when a top-ranked story meets a minimum source threshold (default `>=3`), with one-send-per-story dedupe.
 
 ## Pipeline Notes
 - Ingest runs on schedule through GitHub Actions.
@@ -157,3 +158,4 @@ Last updated: 2026-03-05
 - 2026-03-03: Reworked `/admin/stories` into editor-first sections (`Top 10`, `Next 10 watchlist`, `All other stories`) while keeping existing merge/status actions unchanged.
 - 2026-03-03: Improved `/admin/stories` readability and affordance: metric cards replaced chip-like stat rows, action buttons are visually distinct from static badges, and advanced/rare actions were collapsed to reduce button clutter.
 - 2026-03-05: Updated top-story diversity rules: default max one story per state with source-count override (>=3), and generalized first-pass top-10 mix guard using audience buckets (`teachers`, `admins`, `edtech`) so any single-source lane can be diversified (policy, edtech, etc.) before fallback fills.
+- 2026-03-05: Added automated LinkedIn draft email alerts in ingest for top-ranked stories meeting coverage threshold (default top 10 with >=3 sources), using existing SMTP config and one-send-per-story dedupe via `admin_events`.

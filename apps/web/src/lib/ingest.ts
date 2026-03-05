@@ -155,6 +155,26 @@ const GUARDRAIL_ALERT_EMAIL_EHLO = String(process.env.GUARDRAIL_ALERT_EMAIL_EHLO
 const GUARDRAIL_ALERT_SITE_URL = String(
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://pulsek12.com"
 ).replace(/\/+$/, "");
+const LINKEDIN_TOP_STORY_EMAIL_ENABLED =
+  String(process.env.LINKEDIN_TOP_STORY_EMAIL_ENABLED ?? "true").toLowerCase() !== "false";
+const LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES = envBoundedInt(
+  "LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES",
+  3,
+  2,
+  20
+);
+const LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT = envBoundedInt(
+  "LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT",
+  10,
+  1,
+  20
+);
+const LINKEDIN_TOP_STORY_EMAIL_MAX_SOURCE_NAMES = envBoundedInt(
+  "LINKEDIN_TOP_STORY_EMAIL_MAX_SOURCE_NAMES",
+  3,
+  2,
+  6
+);
 
 const TOP_SLOT_ROUNDUP_PATTERNS = [
   /\bnumber of the week\b/i,
@@ -3158,6 +3178,236 @@ async function maybeSendTopStoryDuplicateEmail(params: {
   }
 }
 
+type LinkedInTopStoryCandidate = {
+  storyId: string;
+  rank: number;
+  title: string;
+  summary: string | null;
+  sourceCount: number;
+};
+
+type StorySourceNameRow = {
+  source_name: string | null;
+};
+
+function normalizeLinkedInLine(input: string | null | undefined) {
+  return String(input ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateLinkedInLine(input: string, max = 260) {
+  if (input.length <= max) return input;
+  const trimmed = input.slice(0, max).trim();
+  const boundary = trimmed.lastIndexOf(" ");
+  if (boundary > 60) return `${trimmed.slice(0, boundary).trim()}...`;
+  return `${trimmed}...`;
+}
+
+function ensureSentence(input: string) {
+  if (!input) return input;
+  if (/[.!?]$/.test(input)) return input;
+  return `${input}.`;
+}
+
+function formatSourceList(names: string[]) {
+  if (names.length === 0) return "multiple national outlets";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+function buildLinkedInPost(params: {
+  title: string;
+  summary: string | null;
+  sourceCount: number;
+  sourceNames: string[];
+}) {
+  const headline = ensureSentence(truncateLinkedInLine(normalizeLinkedInLine(params.title), 240));
+  const meaningBase = normalizeLinkedInLine(params.summary);
+  const meaning = ensureSentence(
+    truncateLinkedInLine(
+      meaningBase ||
+        "Coverage is building across multiple outlets, signaling a high-impact development for school systems.",
+      240
+    )
+  );
+
+  return [
+    `📊 ${params.sourceCount}+ outlets are reporting: ${headline}`,
+    "",
+    `What this means for K-12 leaders: ${meaning}`,
+    "",
+    "📍 Follow stories like this and other trending K-12 stories at PulseK12.com, where headlines from major outlets update throughout the day.",
+    "",
+    `Reported by ${formatSourceList(params.sourceNames)}.`,
+    "",
+    "#K12Education #EducationNews #SchoolLeadership #EdTech"
+  ].join("\n");
+}
+
+async function wasLinkedInTopStoryAlertSent(storyId: string) {
+  try {
+    const result = await pool.query(
+      `select 1
+       from admin_events
+       where event_type = 'ingest_guardrail_email'
+         and coalesce(detail->>'alertType', '') = 'linkedin_post_ready'
+         and coalesce((detail->>'sent')::boolean, false) = true
+         and coalesce(detail->>'storyId', '') = $1
+       limit 1`,
+      [storyId]
+    );
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error(
+      `[ingest] failed to load previous LinkedIn post alerts: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return false;
+  }
+}
+
+async function loadStorySourceNames(storyId: string, limit: number) {
+  try {
+    const result = await pool.query<StorySourceNameRow>(
+      `select src.name as source_name
+       from story_articles sa
+       join articles a on a.id = sa.article_id
+       left join sources src on src.id = a.source_id
+       where sa.story_id = $1
+         and src.name is not null
+       group by src.name
+       order by max(coalesce(a.published_at, a.fetched_at)) desc
+       limit $2`,
+      [storyId, limit]
+    );
+    return result.rows
+      .map((row) => String(row.source_name ?? "").trim())
+      .filter((value) => value.length > 0);
+  } catch (error) {
+    console.error(
+      `[ingest] failed to load source names for LinkedIn post alert: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return [];
+  }
+}
+
+async function maybeSendTopStoryLinkedInEmail() {
+  if (!LINKEDIN_TOP_STORY_EMAIL_ENABLED) return;
+  if (
+    !GUARDRAIL_ALERT_EMAIL_SMTP_HOST ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_USER ||
+    !GUARDRAIL_ALERT_EMAIL_SMTP_PASS ||
+    !GUARDRAIL_ALERT_EMAIL_FROM ||
+    GUARDRAIL_ALERT_EMAIL_TO.length === 0
+  ) {
+    return;
+  }
+
+  const topStories = await getTopStories(
+    Math.max(20, LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT),
+    undefined,
+    {
+      useAiRerank: false,
+      useStoredRank: true
+    }
+  );
+  const rankedWindow = topStories
+    .filter((story) => story.status !== "hidden" && story.status !== "demoted")
+    .slice(0, LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT);
+
+  const candidates: LinkedInTopStoryCandidate[] = rankedWindow
+    .map((story, index) => ({
+      storyId: story.id,
+      rank: index + 1,
+      title: String(story.editor_title ?? story.title ?? "").trim(),
+      summary: String(story.editor_summary ?? story.summary ?? "").trim() || null,
+      sourceCount: Math.max(0, Number(story.source_count ?? 0))
+    }))
+    .filter((candidate) => candidate.title.length > 0)
+    .filter((candidate) => candidate.sourceCount >= LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES);
+
+  if (candidates.length === 0) return;
+
+  let selected: LinkedInTopStoryCandidate | null = null;
+  for (const candidate of candidates) {
+    const alreadySent = await wasLinkedInTopStoryAlertSent(candidate.storyId);
+    if (!alreadySent) {
+      selected = candidate;
+      break;
+    }
+  }
+  if (!selected) return;
+
+  const sourceNames = await loadStorySourceNames(
+    selected.storyId,
+    LINKEDIN_TOP_STORY_EMAIL_MAX_SOURCE_NAMES
+  );
+  const linkedinPost = buildLinkedInPost({
+    title: selected.title,
+    summary: selected.summary,
+    sourceCount: selected.sourceCount,
+    sourceNames
+  });
+
+  const storyUrl = `${GUARDRAIL_ALERT_SITE_URL}/stories/${selected.storyId}`;
+  const subject = `[PulseK12] LinkedIn post ready: #${selected.rank} (${selected.sourceCount} sources)`;
+  const body = [
+    `A top story reached your LinkedIn threshold (>=${LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES} sources).`,
+    `Top rank: #${selected.rank}`,
+    `Source count: ${selected.sourceCount}`,
+    `Story: ${storyUrl}`,
+    `Admin: ${GUARDRAIL_ALERT_SITE_URL}/admin/stories`,
+    "",
+    "Copy/paste LinkedIn post:",
+    "",
+    linkedinPost,
+    "",
+    `Generated at: ${new Date().toISOString()}`
+  ].join("\n");
+
+  try {
+    await sendSmtpTextEmail({
+      host: GUARDRAIL_ALERT_EMAIL_SMTP_HOST,
+      port: GUARDRAIL_ALERT_EMAIL_SMTP_PORT,
+      username: GUARDRAIL_ALERT_EMAIL_SMTP_USER,
+      password: GUARDRAIL_ALERT_EMAIL_SMTP_PASS,
+      from: GUARDRAIL_ALERT_EMAIL_FROM,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      subject,
+      text: body,
+      ehloHost: GUARDRAIL_ALERT_EMAIL_EHLO
+    });
+    await recordGuardrailEmailEvent({
+      alertType: "linkedin_post_ready",
+      sent: true,
+      storyId: selected.storyId,
+      rank: selected.rank,
+      sourceCount: selected.sourceCount,
+      sourceNames,
+      threshold: LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES,
+      rankLimit: LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT,
+      to: GUARDRAIL_ALERT_EMAIL_TO
+    });
+  } catch (error) {
+    console.error(
+      `[ingest] failed to send LinkedIn top-story email: ${error instanceof Error ? error.message : String(error)}`
+    );
+    await recordGuardrailEmailEvent({
+      alertType: "linkedin_post_ready",
+      sent: false,
+      storyId: selected.storyId,
+      rank: selected.rank,
+      sourceCount: selected.sourceCount,
+      sourceNames,
+      threshold: LINKEDIN_TOP_STORY_EMAIL_MIN_SOURCES,
+      rankLimit: LINKEDIN_TOP_STORY_EMAIL_RANK_LIMIT,
+      to: GUARDRAIL_ALERT_EMAIL_TO,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 async function auditTopStoryDuplicatePairs() {
   const candidates = await getTopStories(TOP_STORY_DUPLICATE_AUDIT_LIMIT, undefined, {
     useAiRerank: false,
@@ -3565,6 +3815,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
   const publishGate = await runTopStoriesPublishGate();
   const rankRefresh = await refreshHomepageRanks(60);
+  await maybeSendTopStoryLinkedInEmail();
   const topStoryDuplicateAudit = await auditTopStoryDuplicatePairs();
   const topStoryDuplicatePairs = topStoryDuplicateAudit.duplicatePairs.length;
   const shouldAlertOnTopStoryDuplicates =
