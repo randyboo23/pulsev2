@@ -15,6 +15,7 @@ import {
   refreshHomepageRanks
 } from "./stories";
 import { isLikelyNonStoryTitle, isLikelyNonStoryUrl } from "./story-quality";
+import { hasK12TopicSignal } from "./k12-relevance";
 import { sendSmtpTextEmail } from "./smtp";
 
 const parser = new Parser({
@@ -364,6 +365,7 @@ const MAX_ITEMS_PER_DISCOVERY_FEED = envBoundedInt(
   10,
   100
 );
+const AP_WIRE_MIN_RELEVANCE_SCORE = 0.5;
 const DOWNWEIGHT_PATTERNS = ["edtechinnovationhub", "ethi"];
 
 const US_INDICATORS = [
@@ -3675,10 +3677,22 @@ export async function ingestFeeds(): Promise<IngestResult> {
         nonArticleBlocked += 1;
         continue;
       }
-      // AI relevance gate for discovery feeds and unknown-tier sources
+      const isApEducationFeed =
+        feed.domain === "apnews.com" &&
+        feed.feedType === "scrape" &&
+        /\/hub\/education(?:\/|$)/i.test(feed.url);
+      const apHasK12Signal = isApEducationFeed
+        ? hasK12TopicSignal({
+            title,
+            summary,
+            url: normalizedUrl
+          })
+        : true;
+
+      // AI relevance gate for discovery feeds, unknown-tier sources, and AP education wire.
       let relevanceResult: ContentRelevanceDecision | null = null;
       const needsRelevanceCheck =
-        (feed.feedType === "discovery" || feed.tier === "unknown") &&
+        (feed.feedType === "discovery" || feed.tier === "unknown" || isApEducationFeed) &&
         relevanceChecked < relevanceCheckLimit;
       if (needsRelevanceCheck) {
         relevanceResult = await classifyContentRelevance(title, summary);
@@ -3692,6 +3706,16 @@ export async function ingestFeeds(): Promise<IngestResult> {
           if (relevanceResult.score >= 0.3 && relevanceResult.score < 0.5) {
             quality.label = "uncertain";
           }
+        }
+      }
+      if (isApEducationFeed) {
+        const apRelevanceScore = relevanceResult?.score ?? null;
+        const apPassesScore =
+          typeof apRelevanceScore === "number" && apRelevanceScore >= AP_WIRE_MIN_RELEVANCE_SCORE;
+        if (!apHasK12Signal && !apPassesScore) {
+          skipped += 1;
+          relevanceRejected += 1;
+          continue;
         }
       }
       const publishedAt = rawItem.isoDate

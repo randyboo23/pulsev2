@@ -21,7 +21,8 @@ ingest.ts -- fetch feeds, normalize URLs, resolve redirects
     v
 Quality Gate (ingest.ts) -- classify: article / uncertain / non_article
     |                         personal blog detection (first-person language, how-to, listicles)
-    |                         AI relevance gate (Claude Haiku) for discovery/unknown sources
+    |                         AI relevance gate (Claude Haiku) for discovery/unknown sources + AP education scrape feed
+    |                         deterministic K-12 topical fallback for AP feed when relevance score is missing
     |
     v
 Free HTML Scrape (freeArticleScrape) -- try fetch + readability first (free)
@@ -172,7 +173,7 @@ scripts/
 
 ## Read/Render Contracts
 - Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text and lead metadata.
-- Latest Wire uses `getRecentArticles()`: stricter link/title hygiene.
+- Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
 - Fallback/synthetic text stored for debugging but not shown to users.

@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-03-05
+Last updated: 2026-03-07
 
 ---
 
@@ -72,6 +72,7 @@ Last updated: 2026-03-05
 
 ## AI Relevance Gate
 - Discovery feed articles and unknown-tier sources checked by Claude Haiku.
+- AP News Education scrape feed now also runs through relevance gating, with a deterministic K-12 signal fallback when AI relevance is unavailable.
 - Budget: 100 relevance checks per ingest cycle.
 - Score < 0.3: rejected. Score 0.3-0.5: uncertain (admin review). Score > 0.5: accepted.
 - Stored in `relevance_score`, `relevance_category`, `relevance_reason` columns.
@@ -173,3 +174,4 @@ Last updated: 2026-03-05
 - 2026-03-05: Added source-family normalization + ranking integration so independent family count influences story score/penalties; expanded discovery query mix with a per-discovery-feed item cap to increase source breadth while controlling ingest noise/cost.
 - 2026-03-05: Fixed bad generic merge case (`State of the Union`) by expanding non-story title/path guards (`/tags/`, exact title pattern), adding grouping regression coverage for generic `state+union` overlap, and applying a one-time live demotion/quality cleanup for the affected cluster.
 - 2026-03-05: Added a hard no-opinion top-story rule in `getTopStories` (non-pinned opinions excluded in both stored-rank and live ranking paths), and applied a one-time live demotion/rank refresh for the current opinion slot.
+- 2026-03-07: Added AP-wire topical guardrails: AP education feed items now run relevance checks in ingest, and Latest Wire hides AP rows that have neither K-12 topical signal nor strong relevance score.

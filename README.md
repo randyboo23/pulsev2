@@ -55,6 +55,7 @@ Techmeme for US K-12 education news.
 - Hard-news signal now prioritizes urgency/policy evidence over generic terms, reducing false promotion of instructional feature content.
 - Ranking transparency in QA output (lead reason + score breakdown) for fast tuning.
 - Latest Wire now filters generic section/meta links and short non-headline titles more aggressively.
+- AP News Education wire items now run a K-12 topical guard (ingest + render-time fallback) to suppress off-topic AP posts.
 - Additional fallback-template suppression is applied for legacy synthetic phrasing (including "coverage is converging on ...").
 - Admin controls for feeds, sources, and story status.
 

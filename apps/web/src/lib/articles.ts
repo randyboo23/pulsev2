@@ -1,5 +1,6 @@
 import "server-only";
 import { pool } from "./db";
+import { hasK12TopicSignal } from "./k12-relevance";
 
 export type ArticleRow = {
   id: string;
@@ -9,6 +10,7 @@ export type ArticleRow = {
   published_at: string | null;
   fetched_at: string;
   source_name: string | null;
+  relevance_score: number | null;
 };
 
 const GENERIC_WIRE_TITLE_PATTERNS = [
@@ -40,7 +42,8 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
       a.url,
       a.published_at,
       a.fetched_at,
-      s.name as source_name
+      s.name as source_name,
+      a.relevance_score
     from articles a
     left join sources s on s.id = a.source_id
     where a.url not ilike '%/jobs/%'
@@ -62,13 +65,32 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
       and a.url !~* 'https?://[^/]+/[a-z]{2,24}/?$'
     order by coalesce(a.published_at, a.fetched_at) desc
     limit $1`,
-    [Math.max(limit * 3, limit)]
+    [Math.max(limit * 5, limit)]
   );
 
   return result.rows
     .filter((row) => {
       const title = (row.title ?? "").trim();
-      return title && !isGenericWireTitle(title);
+      if (!title || isGenericWireTitle(title)) return false;
+
+      const isApEducation = (row.source_name ?? "").toLowerCase() === "ap news education";
+      if (!isApEducation) return true;
+
+      const hasK12Signal = hasK12TopicSignal({
+        title: row.title,
+        summary: row.summary,
+        url: row.url
+      });
+      const score =
+        typeof row.relevance_score === "number" && Number.isFinite(row.relevance_score)
+          ? row.relevance_score
+          : null;
+
+      if (!hasK12Signal && (score === null || score < 0.5)) {
+        return false;
+      }
+
+      return true;
     })
     .slice(0, limit);
 }
