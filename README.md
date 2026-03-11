@@ -119,6 +119,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
+- Optional extra check: `npm run qa:audience` (fixture-based audience filter guardrail)
 - Optional extra check: `npm run qa:k12-relevance` (fixture-based K-12 topical filter guardrail)
 - Optional extra check: `npm run qa:newsletter-ranking` (fixture-based weekly newsletter ranking guardrail)
 - Optional live audit: `npm run qa:newsletter-coverage` (requires local `.env`; shows newsletter/homepage source mix and likely unmerged single-source stories)

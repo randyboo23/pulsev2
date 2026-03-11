@@ -189,6 +189,7 @@ scripts/
 
 ## Read/Render Contracts
 - Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text and lead metadata.
+- Homepage audience views (`/?audience=teachers|admins|edtech`) reuse `getTopStories()`, but audience matching is boundary-aware; `edtech` additionally requires K-12 tech context instead of naive substring hits.
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.

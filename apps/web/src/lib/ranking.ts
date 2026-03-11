@@ -116,10 +116,110 @@ const AUDIENCE_KEYWORDS: Record<Audience, string[]> = {
   ]
 };
 
+const EDTECH_EXPLICIT_TERMS = [
+  "edtech",
+  "education technology",
+  "student data privacy",
+  "school cybersecurity",
+  "learning management system",
+  "digital learning",
+  "technology procurement"
+] as const;
+
+const EDTECH_TECH_TERMS = [
+  "ai",
+  "artificial intelligence",
+  "chatbot",
+  "software",
+  "platform",
+  "cybersecurity",
+  "privacy",
+  "screen time",
+  "device",
+  "devices",
+  "technology",
+  "tech",
+  "digital",
+  "lms"
+] as const;
+
+const EDTECH_CONTEXT_TERMS = [
+  "school",
+  "schools",
+  "district",
+  "districts",
+  "student",
+  "students",
+  "teacher",
+  "teachers",
+  "classroom",
+  "classrooms",
+  "k-12",
+  "curriculum",
+  "instruction",
+  "superintendent"
+] as const;
+
+const EDTECH_HIGHER_ED_TERMS = [
+  "college",
+  "colleges",
+  "university",
+  "universities",
+  "community college",
+  "community colleges",
+  "campus",
+  "campuses",
+  "higher ed",
+  "higher education"
+] as const;
+
+const EDTECH_K12_OVERRIDE_TERMS = [
+  "school",
+  "schools",
+  "teacher",
+  "teachers",
+  "classroom",
+  "classrooms",
+  "public school",
+  "k-12",
+  "elementary school",
+  "middle school",
+  "high school"
+] as const;
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsWholeAudienceTerm(text: string, term: string) {
+  const escaped = escapeRegExp(term.trim()).replace(/\s+/g, "\\s+");
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`, "i").test(text);
+}
+
+function matchesEdtechAudience(text: string) {
+  const higherEdOnly =
+    EDTECH_HIGHER_ED_TERMS.some((term) => containsWholeAudienceTerm(text, term)) &&
+    !EDTECH_K12_OVERRIDE_TERMS.some((term) => containsWholeAudienceTerm(text, term));
+  if (higherEdOnly) return false;
+
+  if (EDTECH_EXPLICIT_TERMS.some((term) => containsWholeAudienceTerm(text, term))) {
+    return true;
+  }
+
+  const hasTechSignal = EDTECH_TECH_TERMS.some((term) => containsWholeAudienceTerm(text, term));
+  if (!hasTechSignal) return false;
+
+  return EDTECH_CONTEXT_TERMS.some((term) => containsWholeAudienceTerm(text, term));
+}
+
 export function storyMatchesAudience(text: string, audience: Audience) {
-  const terms = AUDIENCE_KEYWORDS[audience] ?? [];
   const lowered = text.toLowerCase();
-  return terms.some((term) => lowered.includes(term));
+  if (audience === "edtech") {
+    return matchesEdtechAudience(lowered);
+  }
+
+  const terms = AUDIENCE_KEYWORDS[audience] ?? [];
+  return terms.some((term) => containsWholeAudienceTerm(lowered, term));
 }
 
 const KEYWORDS = {

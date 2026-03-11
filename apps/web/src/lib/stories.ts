@@ -1919,6 +1919,12 @@ export async function getTopStories(
 
       const resolvedSummary = editorSummary ?? autoSummary;
       const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
+      const matchesK12AudienceScope =
+        !audience ||
+        hasStrictK12TopicSignal({
+          title: row.editor_title ?? row.title,
+          summary: resolvedSummary
+        });
       const sourceDomains = Array.isArray(row.source_domains)
         ? (row.source_domains as Array<string | null | undefined>)
         : [];
@@ -1964,12 +1970,13 @@ export async function getTopStories(
         lead_reason: ranking.leadReason,
         lead_urgency_override: ranking.urgencyOverride,
         score_breakdown: JSON.stringify(ranking.breakdown),
-        matches_audience: audience ? storyMatchesAudience(text, audience) : true
+        matches_audience:
+          audience ? matchesK12AudienceScope && storyMatchesAudience(text, audience) : true
       };
     });
 
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
-  const finalSet = filtered.length > 0 ? filtered : scored;
+  const finalSet = audience ? filtered : scored;
 
   const demotedStories = finalSet
     .filter((story) => story.status === "demoted")
