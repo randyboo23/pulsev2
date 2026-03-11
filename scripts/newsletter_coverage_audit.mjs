@@ -35,7 +35,7 @@ function summarize(rows) {
 
 function formatStoryRecord(story) {
   return {
-    id: story.id,
+    id: String(story.id ?? story.story_id ?? "").trim(),
     title: String(story.editor_title ?? story.title ?? "").trim(),
     editor_title: story.editor_title ?? null,
     editor_summary: story.editor_summary ?? null,
@@ -135,7 +135,8 @@ const newsletterSingleSource = menu.stories
   .slice(0, STORY_REVIEW_LIMIT);
 
 const auditedStories = newsletterSingleSource.map((story) => {
-  const target = recentStoryMap.get(story.id) ?? formatStoryRecord(story);
+  const targetId = String(story.story_id ?? "").trim();
+  const target = recentStoryMap.get(targetId) ?? formatStoryRecord(story);
   const matches = collectLikelyMatches(target, recentStories);
 
   return {
