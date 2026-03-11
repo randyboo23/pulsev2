@@ -1,6 +1,6 @@
 import "server-only";
 import { pool } from "./db";
-import { hasK12TopicSignal } from "./k12-relevance";
+import { hasStrictK12TopicSignal } from "./k12-relevance";
 
 export type ArticleRow = {
   id: string;
@@ -76,7 +76,7 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
       const isApEducation = (row.source_name ?? "").toLowerCase() === "ap news education";
       if (!isApEducation) return true;
 
-      const hasK12Signal = hasK12TopicSignal({
+      const hasK12Signal = hasStrictK12TopicSignal({
         title: row.title,
         summary: row.summary,
         url: row.url

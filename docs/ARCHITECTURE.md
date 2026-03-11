@@ -23,6 +23,8 @@ Quality Gate (ingest.ts) -- classify: article / uncertain / non_article
     |                         personal blog detection (first-person language, how-to, listicles)
     |                         AI relevance gate (Claude Haiku) for discovery/unknown sources + AP education scrape feed
     |                         deterministic K-12 topical fallback for AP feed when relevance score is missing
+    |                         hard off-topic rejects for sports, higher-ed-only, event listings,
+    |                         international conflict, and non-actionable crime without school-system angle
     |
     v
 Free HTML Scrape (freeArticleScrape) -- try fetch + readability first (free)
@@ -78,7 +80,8 @@ Homepage (page.tsx) -- getTopStories() reads precomputed rank from DB (fallback 
 
 Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ranks a 7-day story slice
                                                 with gentler weekly recency, source-family weighting,
-                                                homepage diversity guards, and primary/supporting article links
+                                                homepage diversity guards, a strict K-12 topical gate,
+                                                and primary/supporting article links
                                                 snapshot logged to `admin_events` for later editor feedback
 ```
 
@@ -168,6 +171,7 @@ db/
 
 scripts/
   newsletter_ranking_regression_check.mjs # Newsletter ranking fixture regression check
+  k12_relevance_regression_check.mjs      # K-12 topical filter regression check
   qa-summaries.sh            # QA runner
   run-merge-stories.mjs      # One-time duplicate-story backfill merge (supports dry run)
   summary_quality_report.mjs # QA report logic

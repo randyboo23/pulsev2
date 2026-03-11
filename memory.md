@@ -74,6 +74,7 @@ Last updated: 2026-03-11
 ## AI Relevance Gate
 - Discovery feed articles and unknown-tier sources checked by Claude Haiku.
 - AP News Education scrape feed now also runs through relevance gating, with a deterministic K-12 signal fallback when AI relevance is unavailable.
+- Deterministic K-12 relevance now hard-rejects clear off-topic patterns before ingest/ranking (sports, higher-ed-only, event listings, international conflict, and non-actionable crime without a school-system angle).
 - Budget: 100 relevance checks per ingest cycle.
 - Score < 0.3: rejected. Score 0.3-0.5: uncertain (admin review). Score > 0.5: accepted.
 - Stored in `relevance_score`, `relevance_category`, `relevance_reason` columns.
@@ -178,3 +179,4 @@ Last updated: 2026-03-11
 - 2026-03-05: Added a hard no-opinion top-story rule in `getTopStories` (non-pinned opinions excluded in both stored-rank and live ranking paths), and applied a one-time live demotion/rank refresh for the current opinion slot.
 - 2026-03-07: Added AP-wire topical guardrails: AP education feed items now run relevance checks in ingest, and Latest Wire hides AP rows that have neither K-12 topical signal nor strong relevance score.
 - 2026-03-11: Added `GET /api/newsletter/menu` with a dedicated weekly ranking profile, primary/supporting article metadata, and `newsletter_menu_generated` snapshot logging in `admin_events` for future editor-feedback capture.
+- 2026-03-11: Tightened K-12 topical filtering across ingest, Latest Wire, and newsletter menu to block AP sports/politics/international leaks plus higher-ed/event/crime false positives; added `qa:k12-relevance` regression coverage for those cases.

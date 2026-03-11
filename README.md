@@ -56,6 +56,7 @@ Techmeme for US K-12 education news.
 - Ranking transparency in QA output (lead reason + score breakdown) for fast tuning.
 - Latest Wire now filters generic section/meta links and short non-headline titles more aggressively.
 - AP News Education wire items now run a K-12 topical guard (ingest + render-time fallback) to suppress off-topic AP posts.
+- Shared K-12 topical filtering now also hard-rejects clear off-topic sports, higher-ed-only, event, international-conflict, and non-actionable crime items before they reach Latest Wire or the newsletter menu.
 - Additional fallback-template suppression is applied for legacy synthetic phrasing (including "coverage is converging on ...").
 - Admin controls for feeds, sources, and story status.
 
@@ -117,6 +118,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
+- Optional extra check: `npm run qa:k12-relevance` (fixture-based K-12 topical filter guardrail)
 - Optional extra check: `npm run qa:newsletter-ranking` (fixture-based weekly newsletter ranking guardrail)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
 - Optional extra check: `npm run qa:source-family` (fixture-based source-family dedupe guardrail)

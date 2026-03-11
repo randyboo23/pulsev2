@@ -15,7 +15,10 @@ import {
   refreshHomepageRanks
 } from "./stories";
 import { isLikelyNonStoryTitle, isLikelyNonStoryUrl } from "./story-quality";
-import { hasK12TopicSignal } from "./k12-relevance";
+import {
+  hasStrictK12TopicSignal,
+  isClearlyOffTopicForK12
+} from "./k12-relevance";
 import { sendSmtpTextEmail } from "./smtp";
 
 const parser = new Parser({
@@ -592,7 +595,7 @@ Summary: ${summary.slice(0, 500)}
 
 RELEVANT topics: policy/legislation, district operations, school board decisions, budget/funding, safety incidents, superintendent/principal news, EdTech procurement, assessment/accountability, workforce/staffing, curriculum adoption decisions, state/federal education policy, school closures/openings.
 
-NOT RELEVANT: personal teacher blogs or "my classroom" posts, individual classroom activities without systemic impact (e.g. running a student club, classroom decoration, lesson ideas), gardening/cooking for teachers, how-to listicles for individual teachers, first-person teacher narratives without policy implications, commercial product announcements without policy context, opinion pieces from non-experts, international education without US impact, general parenting advice, college/university news (unless K-12 pipeline), entertainment. Key signal: if the article uses first-person language ("I teach", "my students", "in my class") and describes personal practice rather than systemic news, score it below 0.3.
+NOT RELEVANT: personal teacher blogs or "my classroom" posts, individual classroom activities without systemic impact (e.g. running a student club, classroom decoration, lesson ideas), gardening/cooking for teachers, how-to listicles for individual teachers, first-person teacher narratives without policy implications, commercial product announcements without policy context, opinion pieces from non-experts, international education without US impact, general parenting advice, college/university news (unless K-12 pipeline), entertainment, sports, event listings/webinars/info sessions, generic crime coverage without a school-system or policy angle, and non-education politics/government stories. Treat isolated words like "school", "principal", or "teacher" as weak evidence on their own.
 
 Respond with ONLY valid JSON:
 {"relevant":true/false,"score":0.0-1.0,"category":"policy|district_ops|curriculum|safety|edtech|workforce|off_topic|personal|commercial","reason":"brief explanation"}`;
@@ -733,6 +736,7 @@ const NON_ARTICLE_PATH_PATTERNS = [
   /\/team(?:\/|$)/i,
   /\/experts?(?:\/|$)/i,
   /\/staff(?:\/|$)/i,
+  /\/events?(?:\/|$)/i,
   /\/tags?(?:\/|$)/i,
   /\/category(?:\/|$)/i,
   /\/topic(?:s)?(?:\/|$)/i,
@@ -3667,6 +3671,17 @@ export async function ingestFeeds(): Promise<IngestResult> {
         skipped += 1;
         continue;
       }
+      if (
+        isClearlyOffTopicForK12({
+          title,
+          summary,
+          url: normalizedUrl
+        })
+      ) {
+        skipped += 1;
+        relevanceRejected += 1;
+        continue;
+      }
       const quality = classifyArticleQuality({
         url: normalizedUrl,
         title,
@@ -3682,7 +3697,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
         feed.feedType === "scrape" &&
         /\/hub\/education(?:\/|$)/i.test(feed.url);
       const apHasK12Signal = isApEducationFeed
-        ? hasK12TopicSignal({
+        ? hasStrictK12TopicSignal({
             title,
             summary,
             url: normalizedUrl

@@ -12,6 +12,7 @@
     "db:setup": "psql -f db/schema.sql",
     "qa:summaries": "bash scripts/qa-summaries.sh",
     "qa:grouping": "node --conditions react-server --import tsx/esm scripts/grouping_regression_check.mjs",
+    "qa:k12-relevance": "node --import tsx/esm scripts/k12_relevance_regression_check.mjs",
     "qa:newsletter-ranking": "node --import tsx/esm scripts/newsletter_ranking_regression_check.mjs",
     "qa:story-quality": "node --import tsx/esm scripts/story_quality_regression_check.mjs",
     "qa:source-family": "node --import tsx/esm scripts/source_family_regression_check.mjs",

@@ -13,6 +13,7 @@ import {
   type StoryType
 } from "./ranking";
 import { isLikelyNonStoryTitle } from "./story-quality";
+import { hasStrictK12TopicSignal } from "./k12-relevance";
 import { countSourceFamilies } from "./source-family";
 
 function normalizeTitleCase(title: string) {
@@ -1415,7 +1416,7 @@ export async function getNewsletterMenuStories(
       if (REJECT_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return false;
       return true;
     })
-    .map((row) => {
+    .flatMap((row) => {
       const editorSummary = normalizeSummary(row.editor_summary as string | null | undefined);
       const storySummary = normalizeSummary(row.summary as string | null | undefined);
       const latestArticleSummary = normalizeSummary(row.latest_summary as string | null | undefined);
@@ -1478,6 +1479,14 @@ export async function getNewsletterMenuStories(
       const sourceFamilyCount = countSourceFamilies(sourceDomains);
       const title = normalizeTitleCase(row.title ?? "");
       const displayTitle = String(row.editor_title ?? "").trim() || title;
+      if (
+        !hasStrictK12TopicSignal({
+          title: displayTitle,
+          summary: resolvedSummary
+        })
+      ) {
+        return [];
+      }
       const ranking = analyzeNewsletterStoryRanking({
         title: displayTitle,
         summary: resolvedSummary,
@@ -1489,7 +1498,7 @@ export async function getNewsletterMenuStories(
         latestAt: new Date(row.latest_at)
       });
 
-      return {
+      return [{
         id: row.id,
         title,
         summary: resolvedSummary,
@@ -1517,9 +1526,9 @@ export async function getNewsletterMenuStories(
         story_type: ranking.storyType,
         lead_urgency_override: ranking.urgencyOverride,
         why_ranked: ranking.whyRanked
-      } satisfies NewsletterStoryCandidate;
+      } satisfies NewsletterStoryCandidate];
     })
-    .filter((story) => story.story_type !== "opinion");
+    .filter((story) => story.story_type !== "opinion" && story.story_type !== "evergreen");
 
   const diversityWeighted = applyTopicSimilarityPenalty(scored);
   const selected = selectDiverseTopStories(diversityWeighted, boundedLimit) as NewsletterStoryCandidate[];
