@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-03-07
+Last updated: 2026-03-11
 
 ---
 
@@ -68,6 +68,7 @@ Last updated: 2026-03-07
 - Evergreen classification requires `impact === 0 && novelty === 0`.
 - Relevance weight: 1.3x.
 - AI reranker (Sonnet) now runs at ingest-time and persists homepage order in `stories.homepage_rank`.
+- Newsletter menu now has a dedicated weekly ranking profile over a 7-day story slice, with gentler recency decay and the same diversity/source-quality guardrails used by homepage ranking.
 - Unknown source default weight: 0.7.
 
 ## AI Relevance Gate
@@ -83,7 +84,7 @@ Last updated: 2026-03-07
 
 ## Source Policy
 - 20+ curated RSS/scrape feeds.
-- 6 Google News discovery queries with exclusions for personal blogs.
+- 8 Google News discovery queries with exclusions for personal blogs.
 - Tier A national outlets: AP, Reuters, NYT, WaPo, Politico, NPR, PBS.
 - Edutopia: lowest source tier (mostly teacher blogs, not news, garbled headlines).
 - Unknown source default weight lowered to 0.7.
@@ -111,6 +112,7 @@ Last updated: 2026-03-07
 - Ingest runs on schedule through GitHub Actions.
 - Manual `/admin/stories` backfill is recovery-only, not daily workflow.
 - One-time duplicate-story cleanup is available via `scripts/run-merge-stories.mjs` (dry run supported).
+- Newsletter menu snapshots are logged in `admin_events` (`event_type = newsletter_menu_generated`) so later editorial selections can attach to a durable menu run.
 - Runtime path remains in `apps/web`; `apps/worker` is deferred.
 - `extractJson()` helper strips markdown fences and preamble from Claude API responses before JSON parsing.
 
@@ -122,7 +124,7 @@ Last updated: 2026-03-07
 1. Stabilize current ranking and summary quality improvements.
 2. Implement embedding-based story clustering (see docs/embedding-clustering-spec.md).
 3. Add fixture-based regression tests for ranking and quality gates.
-4. Build newsletter subscription feature.
+4. Add newsletter feedback capture on top of the weekly menu endpoint.
 
 ## Decisions Log
 - 2026-02-06: Added free HTML scrape layer before Firecrawl to reduce API costs.
@@ -175,3 +177,4 @@ Last updated: 2026-03-07
 - 2026-03-05: Fixed bad generic merge case (`State of the Union`) by expanding non-story title/path guards (`/tags/`, exact title pattern), adding grouping regression coverage for generic `state+union` overlap, and applying a one-time live demotion/quality cleanup for the affected cluster.
 - 2026-03-05: Added a hard no-opinion top-story rule in `getTopStories` (non-pinned opinions excluded in both stored-rank and live ranking paths), and applied a one-time live demotion/rank refresh for the current opinion slot.
 - 2026-03-07: Added AP-wire topical guardrails: AP education feed items now run relevance checks in ingest, and Latest Wire hides AP rows that have neither K-12 topical signal nor strong relevance score.
+- 2026-03-11: Added `GET /api/newsletter/menu` with a dedicated weekly ranking profile, primary/supporting article metadata, and `newsletter_menu_generated` snapshot logging in `admin_events` for future editor-feedback capture.

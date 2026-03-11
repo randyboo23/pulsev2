@@ -1,6 +1,12 @@
 import "server-only";
+import type {
+  NewsletterMenuArticle,
+  NewsletterMenuResponse,
+  NewsletterRankingReason
+} from "@pulse/core";
 import { pool } from "./db";
 import {
+  analyzeNewsletterStoryRanking,
   analyzeStoryRanking,
   storyMatchesAudience,
   type Audience,
@@ -126,6 +132,9 @@ const TRAILING_BOILERPLATE_PATTERNS = [
 
 const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
 const HOMEPAGE_RANK_COLUMN_CHECK_TTL_MS = 60_000;
+export const NEWSLETTER_RANKING_VERSION = "newsletter_v1";
+export const NEWSLETTER_MENU_DEFAULT_LIMIT = 30;
+export const NEWSLETTER_MENU_DEFAULT_DAYS = 7;
 
 let homepageRankColumnsAvailable: boolean | null = null;
 let homepageRankColumnsCheckedAt = 0;
@@ -275,6 +284,47 @@ export type StoryArticleRow = {
 export type StoryByIdResult = {
   story: StoryDetailRow;
   articles: StoryArticleRow[];
+};
+
+type NewsletterCandidateRow = {
+  id: string;
+  title: string;
+  summary: string | null;
+  preview_text: string | null;
+  preview_type: string | null;
+  preview_confidence: number | string | null;
+  preview_reason: string | null;
+  editor_title: string | null;
+  editor_summary: string | null;
+  homepage_rank?: number | string | null;
+  homepage_ranked_at?: string | null;
+  status: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  article_count: number | string;
+  source_count: number | string;
+  source_domains: Array<string | null> | null;
+  recent_count: number | string;
+  avg_weight: number | string | null;
+  latest_at: string;
+  latest_summary: string | null;
+};
+
+type NewsletterMenuArticleRow = {
+  story_id: string;
+  url: string;
+  title: string | null;
+  domain: string | null;
+  source_name: string | null;
+  published_at: string | null;
+  is_primary: boolean;
+};
+
+type NewsletterStoryCandidate = StoryRow & {
+  actual_status: string | null;
+  newsletter_score: number;
+  why_ranked: NewsletterRankingReason[];
+  source_domains: string[];
 };
 
 const SUMMARY_DEDUPE_STOPWORDS = new Set([
@@ -1200,6 +1250,349 @@ Respond with ONLY valid JSON:
       `[rerank] failed: ${error instanceof Error ? error.message : String(error)}`
     );
     return stories.slice(0, limit);
+  }
+}
+
+type NewsletterMenuOptions = {
+  menuId: string;
+  limit?: number;
+  daysBack?: number;
+};
+
+async function loadNewsletterMenuArticles(storyIds: string[], daysBack: number) {
+  const grouped = new Map<string, NewsletterMenuArticle[]>();
+  if (storyIds.length === 0) return grouped;
+
+  const result = await pool.query<NewsletterMenuArticleRow>(
+    `select
+       sa.story_id,
+       a.url,
+       a.title,
+       coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), ''))) as domain,
+       src.name as source_name,
+       coalesce(a.published_at, a.fetched_at) as published_at,
+       sa.is_primary
+     from story_articles sa
+     join articles a on a.id = sa.article_id
+     left join sources src on src.id = a.source_id
+     where sa.story_id = any($1::uuid[])
+       and coalesce(a.published_at, a.fetched_at) >= now() - make_interval(days => $2::int)
+       and a.url not ilike '%/jobs/%'
+       and a.url not ilike '%://jobs.%'
+       and a.url not ilike '%/careers/%'
+       and coalesce(a.quality_label, 'unknown') <> 'non_article'
+       and (a.title is null or a.title not ilike 'from %')
+       and a.url not ilike '%/profile/%'
+       and a.url not ilike '%/profiles/%'
+       and a.url not ilike '%/author/%'
+       and a.url not ilike '%/authors/%'
+       and a.url not ilike '%/about/%'
+       and a.url not ilike '%/bio/%'
+       and a.url not ilike '%/people/%'
+       and a.url not ilike '%/person/%'
+       and a.url not ilike '%/team/%'
+       and a.url not ilike '%/experts/%'
+       and a.url not ilike '%/expert/%'
+       and a.url !~* 'https?://[^/]+/[a-z]{2,24}/?$'
+     order by sa.story_id asc, sa.is_primary desc, coalesce(a.published_at, a.fetched_at) desc`,
+    [storyIds, daysBack]
+  );
+
+  for (const row of result.rows) {
+    const articles = grouped.get(row.story_id) ?? [];
+    articles.push({
+      url: row.url,
+      title: row.title,
+      domain: row.domain,
+      source_name: row.source_name,
+      published_at: row.published_at,
+      is_primary: row.is_primary
+    });
+    grouped.set(row.story_id, articles);
+  }
+
+  return grouped;
+}
+
+export async function getNewsletterMenuStories(
+  options: NewsletterMenuOptions
+): Promise<NewsletterMenuResponse> {
+  const boundedLimit = Math.min(Math.max(Math.floor(options.limit ?? NEWSLETTER_MENU_DEFAULT_LIMIT), 10), 50);
+  const boundedDaysBack = Math.min(Math.max(Math.floor(options.daysBack ?? NEWSLETTER_MENU_DEFAULT_DAYS), 3), 14);
+  const candidateLimit = Math.min(240, Math.max(boundedLimit * 6, 120));
+  const generatedAt = new Date().toISOString();
+  const rankColumnsAvailable = await hasHomepageRankColumns();
+  const homepageRankSelect = rankColumnsAvailable
+    ? "s.homepage_rank, s.homepage_ranked_at,"
+    : "null::integer as homepage_rank, null::timestamptz as homepage_ranked_at,";
+
+  const result = await pool.query<NewsletterCandidateRow>(
+    `select
+      s.id,
+      s.title,
+      s.summary,
+      s.preview_text,
+      s.preview_type,
+      s.preview_confidence,
+      s.preview_reason,
+      s.editor_title,
+      s.editor_summary,
+      ${homepageRankSelect}
+      s.status,
+      s.first_seen_at,
+      s.last_seen_at,
+      count(sa.article_id) as article_count,
+      count(distinct coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), '')))) as source_count,
+      array_remove(
+        array_agg(distinct coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), '')))),
+        null
+      ) as source_domains,
+      count(a.id) filter (where coalesce(a.published_at, a.fetched_at) >= now() - interval '72 hours') as recent_count,
+      avg(coalesce(src.weight, 1.0)) as avg_weight,
+      max(coalesce(a.published_at, a.fetched_at)) as latest_at,
+      max(latest.latest_summary) as latest_summary
+    from stories s
+    join story_articles sa on sa.story_id = s.id
+    join articles a on a.id = sa.article_id
+    left join sources src on src.id = a.source_id
+    left join lateral (
+      select a2.summary as latest_summary
+      from story_articles sa2
+      join articles a2 on a2.id = sa2.article_id
+      where sa2.story_id = s.id
+        and coalesce(a2.published_at, a2.fetched_at) >= now() - make_interval(days => $1::int)
+        and coalesce(a2.quality_label, 'unknown') <> 'non_article'
+        and (a2.title is null or a2.title not ilike 'from %')
+        and a2.url not ilike '%/profile/%'
+        and a2.url not ilike '%/profiles/%'
+        and a2.url not ilike '%/author/%'
+        and a2.url not ilike '%/authors/%'
+        and a2.url not ilike '%/about/%'
+        and a2.url not ilike '%/bio/%'
+        and a2.url not ilike '%/people/%'
+        and a2.url not ilike '%/person/%'
+        and a2.url not ilike '%/team/%'
+        and a2.url not ilike '%/experts/%'
+        and a2.url not ilike '%/expert/%'
+        and a2.url !~* 'https?://[^/]+/[a-z]{2,24}/?$'
+        and a2.summary is not null
+        and length(trim(a2.summary)) > 0
+      order by sa2.is_primary desc, coalesce(a2.published_at, a2.fetched_at) desc
+      limit 1
+    ) latest on true
+    where coalesce(a.published_at, a.fetched_at) >= now() - make_interval(days => $1::int)
+      and a.url not ilike '%/jobs/%'
+      and a.url not ilike '%://jobs.%'
+      and a.url not ilike '%/careers/%'
+      and coalesce(a.quality_label, 'unknown') <> 'non_article'
+      and (a.title is null or a.title not ilike 'from %')
+      and a.url not ilike '%/profile/%'
+      and a.url not ilike '%/profiles/%'
+      and a.url not ilike '%/author/%'
+      and a.url not ilike '%/authors/%'
+      and a.url not ilike '%/about/%'
+      and a.url not ilike '%/bio/%'
+      and a.url not ilike '%/people/%'
+      and a.url not ilike '%/person/%'
+      and a.url not ilike '%/team/%'
+      and a.url not ilike '%/experts/%'
+      and a.url not ilike '%/expert/%'
+      and a.url !~* 'https?://[^/]+/[a-z]{2,24}/?$'
+    group by s.id
+    order by max(coalesce(a.published_at, a.fetched_at)) desc
+    limit $2`,
+    [boundedDaysBack, candidateLimit]
+  );
+
+  const scored = result.rows
+    .filter((row) => row.status !== "hidden")
+    .filter((row) => {
+      const title = String(row.editor_title ?? row.title ?? "").trim();
+      if (!title) return false;
+      if (isLikelyNonStoryTitle(title)) return false;
+      if (/^from\s+/i.test(title)) return false;
+      if (/^(news|opinion|podcast|video)\s*\|/i.test(title)) return false;
+      if (REJECT_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return false;
+      return true;
+    })
+    .map((row) => {
+      const editorSummary = normalizeSummary(row.editor_summary as string | null | undefined);
+      const storySummary = normalizeSummary(row.summary as string | null | undefined);
+      const latestArticleSummary = normalizeSummary(row.latest_summary as string | null | undefined);
+      const previewText = normalizeSummary(row.preview_text as string | null | undefined);
+      const previewTypeRaw = String(row.preview_type ?? "").toLowerCase();
+      const previewTypeValue =
+        previewTypeRaw === "full" ||
+        previewTypeRaw === "excerpt" ||
+        previewTypeRaw === "headline_only" ||
+        previewTypeRaw === "synthetic"
+          ? previewTypeRaw
+          : null;
+      const previewReason = String(row.preview_reason ?? "").trim();
+      const previewConfidenceRaw = Number(row.preview_confidence ?? 0);
+      const previewConfidence = Number(
+        clamp(Number.isFinite(previewConfidenceRaw) ? previewConfidenceRaw : 0, 0, 1).toFixed(2)
+      );
+      const homepageRankRaw = row.homepage_rank as number | string | null | undefined;
+      const homepageRank = homepageRankRaw == null ? null : Number(homepageRankRaw);
+      const normalizedHomepageRank =
+        Number.isFinite(homepageRank) && Number(homepageRank) > 0
+          ? Number(homepageRank)
+          : null;
+
+      const hasStructuredPreview =
+        previewTypeValue === "full" || previewTypeValue === "excerpt" || previewTypeValue === "headline_only";
+      const isLegacyDefaultHeadlineOnly =
+        previewTypeValue === "headline_only" &&
+        !previewText &&
+        previewConfidence === 0 &&
+        previewReason.length === 0;
+      let autoSummary: string | null = null;
+      let autoPreviewType: "full" | "excerpt" | "headline_only" = "headline_only";
+      let autoPreviewConfidence = previewConfidence;
+
+      if (hasStructuredPreview && !isLegacyDefaultHeadlineOnly) {
+        if (
+          (previewTypeValue === "full" || previewTypeValue === "excerpt") &&
+          previewText &&
+          previewConfidence >= MIN_PREVIEW_CONFIDENCE
+        ) {
+          autoSummary = previewText;
+          autoPreviewType = previewTypeValue;
+        } else {
+          autoSummary = null;
+          autoPreviewType = "headline_only";
+        }
+      } else {
+        autoSummary = storySummary ?? latestArticleSummary;
+        autoPreviewType = autoSummary ? "excerpt" : "headline_only";
+        autoPreviewConfidence = autoSummary ? 0.5 : 0;
+      }
+
+      const resolvedSummary = editorSummary ?? autoSummary;
+      const sourceDomains = Array.isArray(row.source_domains)
+        ? row.source_domains
+            .map((value) => String(value ?? "").trim().toLowerCase())
+            .filter((value) => value.length > 0)
+        : [];
+      const sourceFamilyCount = countSourceFamilies(sourceDomains);
+      const title = normalizeTitleCase(row.title ?? "");
+      const displayTitle = String(row.editor_title ?? "").trim() || title;
+      const ranking = analyzeNewsletterStoryRanking({
+        title: displayTitle,
+        summary: resolvedSummary,
+        articleCount: Number(row.article_count),
+        sourceCount: Number(row.source_count),
+        familyCount: sourceFamilyCount,
+        recentCount: Number(row.recent_count),
+        avgWeight: Number(row.avg_weight ?? 1),
+        latestAt: new Date(row.latest_at)
+      });
+
+      return {
+        id: row.id,
+        title,
+        summary: resolvedSummary,
+        preview_text: resolvedSummary,
+        preview_type: editorSummary ? "full" : autoPreviewType,
+        preview_confidence: editorSummary ? 1 : autoPreviewConfidence,
+        preview_reason: previewReason,
+        editor_title: String(row.editor_title ?? "").trim() || null,
+        editor_summary: editorSummary,
+        status: "active",
+        actual_status: row.status ?? null,
+        first_seen_at: row.first_seen_at,
+        last_seen_at: row.last_seen_at,
+        article_count: Number(row.article_count),
+        source_count: Number(row.source_count),
+        source_family_count: sourceFamilyCount,
+        source_domains: sourceDomains,
+        recent_count: Number(row.recent_count),
+        avg_weight: Number(row.avg_weight ?? 1),
+        latest_at: row.latest_at,
+        score: ranking.score,
+        newsletter_score: ranking.score,
+        homepage_rank: normalizedHomepageRank,
+        homepage_ranked_at: (row.homepage_ranked_at as string | null | undefined) ?? null,
+        story_type: ranking.storyType,
+        lead_urgency_override: ranking.urgencyOverride,
+        why_ranked: ranking.whyRanked
+      } satisfies NewsletterStoryCandidate;
+    })
+    .filter((story) => story.story_type !== "opinion");
+
+  const diversityWeighted = applyTopicSimilarityPenalty(scored);
+  const selected = selectDiverseTopStories(diversityWeighted, boundedLimit) as NewsletterStoryCandidate[];
+  const articleMap = await loadNewsletterMenuArticles(
+    selected.map((story) => story.id),
+    boundedDaysBack
+  );
+
+  return {
+    menu_id: options.menuId,
+    generated_at: generatedAt,
+    ranking_version: NEWSLETTER_RANKING_VERSION,
+    window_days: boundedDaysBack,
+    limit: boundedLimit,
+    stories: selected.map((story, index) => {
+      const articles = articleMap.get(story.id) ?? [];
+      const primaryArticle = articles.find((article) => article.is_primary) ?? articles[0] ?? null;
+      const supportingArticles = articles
+        .filter((article) => !primaryArticle || article.url !== primaryArticle.url)
+        .slice(0, 3);
+
+      return {
+        menu_rank: index + 1,
+        newsletter_score: story.score,
+        why_ranked: story.why_ranked,
+        story_id: story.id,
+        title: story.editor_title ?? story.title,
+        summary: story.editor_summary ?? story.summary,
+        preview_type: story.preview_type ?? null,
+        preview_confidence: story.preview_confidence ?? null,
+        story_type: story.story_type ?? "feature",
+        status: story.actual_status,
+        article_count: story.article_count,
+        source_count: story.source_count,
+        source_family_count: story.source_family_count ?? 0,
+        source_domains: story.source_domains,
+        latest_at: story.latest_at,
+        homepage_rank: story.homepage_rank ?? null,
+        homepage_ranked_at: story.homepage_ranked_at ?? null,
+        primary_article: primaryArticle,
+        supporting_articles: supportingArticles
+      };
+    })
+  };
+}
+
+export async function recordNewsletterMenuSnapshot(menu: NewsletterMenuResponse) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('newsletter_menu_generated', $1::jsonb)`,
+      [
+        JSON.stringify({
+          menu_id: menu.menu_id,
+          generated_at: menu.generated_at,
+          ranking_version: menu.ranking_version,
+          window_days: menu.window_days,
+          limit: menu.limit,
+          story_ids: menu.stories.map((story) => story.story_id),
+          stories: menu.stories.map((story) => ({
+            menu_rank: story.menu_rank,
+            newsletter_score: story.newsletter_score,
+            story_id: story.story_id,
+            title: story.title,
+            primary_url: story.primary_article?.url ?? null
+          }))
+        })
+      ]
+    );
+  } catch (error) {
+    console.error(
+      `[newsletter] failed to record menu snapshot: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 

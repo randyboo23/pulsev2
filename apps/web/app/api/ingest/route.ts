@@ -1,24 +1,20 @@
 import { ingestFeeds } from "@/src/lib/ingest";
+import { isSecretAuthorized } from "@/src/lib/request-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function isAuthorized(request: Request) {
-  const ingestSecret = process.env.INGEST_SECRET;
-  const cronSecret = process.env.CRON_SECRET;
-
-  const headerSecret = request.headers.get("x-ingest-secret");
-  if (ingestSecret && headerSecret === ingestSecret) return true;
-
-  const authHeader = request.headers.get("authorization") ?? "";
-  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
-  const bearerToken = bearerMatch?.[1]?.trim();
-  if (!bearerToken) return false;
-
-  if (cronSecret && bearerToken === cronSecret) return true;
-  if (ingestSecret && bearerToken === ingestSecret) return true;
-  return false;
+  return isSecretAuthorized(request, {
+    headerSecrets: [
+      {
+        headerName: "x-ingest-secret",
+        secret: process.env.INGEST_SECRET
+      }
+    ],
+    bearerSecrets: [process.env.CRON_SECRET, process.env.INGEST_SECRET]
+  });
 }
 
 async function runIngest(request: Request) {

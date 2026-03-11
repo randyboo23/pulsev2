@@ -75,6 +75,11 @@ AI Reranking (ingest.ts -> stories.ts) -- Sonnet reorders top stories by editori
     v
 Homepage (page.tsx) -- getTopStories() reads precomputed rank from DB (fallback compute if rank missing)
                        Latest Wire sidebar via getRecentArticles()
+
+Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ranks a 7-day story slice
+                                                with gentler weekly recency, source-family weighting,
+                                                homepage diversity guards, and primary/supporting article links
+                                                snapshot logged to `admin_events` for later editor feedback
 ```
 
 ## Request Flows
@@ -86,6 +91,9 @@ Homepage (page.tsx) -- getTopStories() reads precomputed rank from DB (fallback 
   - `POST /api/ingest` with `x-ingest-secret`.
 - Manual summary recovery:
   - Admin trigger calls `fillStorySummaries()` for top stories only.
+- Weekly newsletter menu:
+  - Editor/Cowork calls `GET /api/newsletter/menu` with `Authorization: Bearer <NEWSLETTER_SECRET>` or `x-newsletter-secret`.
+  - Route returns ranked weekly story menu JSON and logs the generated menu snapshot to `admin_events`.
 
 ## Pages
 
@@ -130,6 +138,7 @@ apps/web/
     opengraph-image.tsx      # Auto-generated OG image
     api/
       ingest/route.ts        # Ingest endpoint (GET + POST)
+      newsletter/menu/route.ts       # Weekly newsletter menu endpoint
       newsletter/subscribe/route.ts  # Beehiiv subscribe proxy
       admin/generate-summaries/route.ts
       admin/cleanup-international/route.ts
@@ -158,6 +167,7 @@ db/
   schema.sql                 # Postgres schema (idempotent)
 
 scripts/
+  newsletter_ranking_regression_check.mjs # Newsletter ranking fixture regression check
   qa-summaries.sh            # QA runner
   run-merge-stories.mjs      # One-time duplicate-story backfill merge (supports dry run)
   summary_quality_report.mjs # QA report logic
@@ -173,6 +183,7 @@ scripts/
 
 ## Read/Render Contracts
 - Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text and lead metadata.
+- Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
@@ -180,6 +191,7 @@ scripts/
 
 ## Notes
 - Newsletter subscribe uses Beehiiv API via server-side proxy (`/api/newsletter/subscribe`). Requires `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID` env vars.
+- Newsletter menu requires `NEWSLETTER_SECRET`; generated menus are logged in `admin_events` under `newsletter_menu_generated` for later feedback attachment.
 - SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.
@@ -188,3 +200,4 @@ scripts/
 - Grouping starts lexical (`story_key`) and then does a token-overlap merge pass with state/entity vetoes plus mixed-cluster outlier splits; semantic edge cases still remain until embedding clustering lands.
 - Worker orchestration (`apps/worker`) is not yet the runtime execution path.
 - No comprehensive fixture-based regression suite yet for summary/ranking (grouping has a focused fixture regression check).
+- Newsletter feedback capture UI is not built yet; only the weekly menu snapshot persistence is in place.

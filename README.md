@@ -78,8 +78,25 @@ Techmeme for US K-12 education news.
 4. Optional Firecrawl controls: `FIRECRAWL_DAILY_BUDGET` (default `90`), `FIRECRAWL_PRIORITY_STORY_LIMIT` (default `12`).
 5. Optional for scheduled GET calls: set `CRON_SECRET`.
 6. Optional for newsletter subscribe: set `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID`.
-7. Run SQL from `db/schema.sql`.
-8. POST to `/api/ingest` with header `x-ingest-secret`.
+7. Optional for weekly newsletter menu: set `NEWSLETTER_SECRET`.
+8. Run SQL from `db/schema.sql`.
+9. POST to `/api/ingest` with header `x-ingest-secret`.
+
+## Weekly Newsletter Menu
+- Endpoint: `GET /api/newsletter/menu`
+- Auth: `Authorization: Bearer <NEWSLETTER_SECRET>` or `x-newsletter-secret: <NEWSLETTER_SECRET>`
+- Query params:
+  - `limit` (default `30`, bounded `10..50`)
+  - `days` (default `7`, bounded `3..14`)
+- Response includes:
+  - `menu_id`
+  - `ranking_version`
+  - ranked stories with `why_ranked`, weekly score, source counts, and primary/supporting article links
+- Intended workflow:
+  - Cowork/editor fetches the weekly menu
+  - shortlists stories for the issue
+  - uses returned links and summaries to draft Beehiiv-ready blurbs
+- Each generated menu is also logged to `admin_events` as `newsletter_menu_generated` so future feedback can attach to the exact menu snapshot that was shown.
 
 ## Automation (Recommended)
 - Use a scheduler to hit `/api/ingest` every 30 minutes.
@@ -100,6 +117,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Terminal 1: `npm run dev:web`
 - Terminal 2: `npm run qa:summaries`
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
+- Optional extra check: `npm run qa:newsletter-ranking` (fixture-based weekly newsletter ranking guardrail)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
 - Optional extra check: `npm run qa:source-family` (fixture-based source-family dedupe guardrail)
 - Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
