@@ -14,6 +14,7 @@
     "qa:grouping": "node --conditions react-server --import tsx/esm scripts/grouping_regression_check.mjs",
     "qa:k12-relevance": "node --import tsx/esm scripts/k12_relevance_regression_check.mjs",
     "qa:newsletter-ranking": "node --import tsx/esm scripts/newsletter_ranking_regression_check.mjs",
+    "qa:newsletter-coverage": "/bin/zsh -lc \"set -a; source .env >/dev/null 2>&1; node --conditions react-server --import tsx/esm scripts/newsletter_coverage_audit.mjs\"",
     "qa:story-quality": "node --import tsx/esm scripts/story_quality_regression_check.mjs",
     "qa:source-family": "node --import tsx/esm scripts/source_family_regression_check.mjs",
     "qa:guardrails": "bash scripts/qa-guardrails.sh"

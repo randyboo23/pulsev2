@@ -79,7 +79,8 @@ Homepage (page.tsx) -- getTopStories() reads precomputed rank from DB (fallback 
                        Latest Wire sidebar via getRecentArticles()
 
 Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ranks a 7-day story slice
-                                                with gentler weekly recency, source-family weighting,
+                                                with gentler weekly recency, wider candidate scan,
+                                                stronger corroboration boosts, source-family weighting,
                                                 homepage diversity guards, a strict K-12 topical gate,
                                                 and primary/supporting article links
                                                 snapshot logged to `admin_events` for later editor feedback
@@ -172,6 +173,7 @@ db/
 scripts/
   newsletter_ranking_regression_check.mjs # Newsletter ranking fixture regression check
   k12_relevance_regression_check.mjs      # K-12 topical filter regression check
+  newsletter_coverage_audit.mjs           # Live source-mix + likely-unmerged newsletter audit
   qa-summaries.sh            # QA runner
   run-merge-stories.mjs      # One-time duplicate-story backfill merge (supports dry run)
   summary_quality_report.mjs # QA report logic

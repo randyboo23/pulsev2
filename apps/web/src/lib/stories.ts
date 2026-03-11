@@ -133,7 +133,7 @@ const TRAILING_BOILERPLATE_PATTERNS = [
 
 const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
 const HOMEPAGE_RANK_COLUMN_CHECK_TTL_MS = 60_000;
-export const NEWSLETTER_RANKING_VERSION = "newsletter_v1";
+export const NEWSLETTER_RANKING_VERSION = "newsletter_v2";
 export const NEWSLETTER_MENU_DEFAULT_LIMIT = 30;
 export const NEWSLETTER_MENU_DEFAULT_DAYS = 7;
 
@@ -326,6 +326,7 @@ type NewsletterStoryCandidate = StoryRow & {
   newsletter_score: number;
   why_ranked: NewsletterRankingReason[];
   source_domains: string[];
+  story_ids: string[];
 };
 
 const SUMMARY_DEDUPE_STOPWORDS = new Set([
@@ -937,6 +938,153 @@ function applyTopicSimilarityPenalty(stories: StoryRow[]) {
   return [...pinned.sort((a, b) => b.score - a.score), ...rest.sort((a, b) => b.score - a.score)];
 }
 
+function canonicalizeNewsletterCandidateTitle(title: string) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collapseExactTitleDuplicateNewsletterCandidates(stories: NewsletterStoryCandidate[]) {
+  if (stories.length <= 1) return stories;
+
+  const groups = new Map<string, NewsletterStoryCandidate[]>();
+  for (const story of stories) {
+    const key = canonicalizeNewsletterCandidateTitle(String(story.editor_title ?? story.title ?? ""));
+    const bucket = groups.get(key) ?? [];
+    bucket.push(story);
+    groups.set(key, bucket);
+  }
+
+  const collapsed: NewsletterStoryCandidate[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      collapsed.push(group[0]);
+      continue;
+    }
+
+    const ordered = [...group].sort((a, b) => {
+      const pinnedDiff =
+        (String(b.actual_status ?? b.status ?? "") === "pinned" ? 1 : 0) -
+        (String(a.actual_status ?? a.status ?? "") === "pinned" ? 1 : 0);
+      if (pinnedDiff !== 0) return pinnedDiff;
+
+      const scoreDiff = Number(b.newsletter_score ?? b.score ?? 0) - Number(a.newsletter_score ?? a.score ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      return new Date(b.latest_at).getTime() - new Date(a.latest_at).getTime();
+    });
+    const primary = ordered[0];
+    const storyIds = Array.from(new Set(group.flatMap((story) => story.story_ids ?? [story.id])));
+    const sourceDomains = Array.from(
+      new Set(
+        group.flatMap((story) =>
+          (story.source_domains ?? []).map((domain) => String(domain ?? "").trim().toLowerCase()).filter(Boolean)
+        )
+      )
+    );
+    const articleCount = group.reduce((sum, story) => sum + Math.max(0, Number(story.article_count ?? 0)), 0);
+    const recentCount = group.reduce((sum, story) => sum + Math.max(0, Number(story.recent_count ?? 0)), 0);
+    const weightedAuthority = group.reduce(
+      (sum, story) =>
+        sum + Math.max(0, Number(story.article_count ?? 0)) * Math.max(0, Number(story.avg_weight ?? 0)),
+      0
+    );
+    const avgWeight =
+      articleCount > 0 ? weightedAuthority / articleCount : Math.max(0, Number(primary.avg_weight ?? 1));
+    const latestAt = new Date(
+      Math.max(...group.map((story) => new Date(story.latest_at).getTime()))
+    ).toISOString();
+    const firstSeenAt = new Date(
+      Math.min(...group.map((story) => new Date(story.first_seen_at).getTime()))
+    ).toISOString();
+    const lastSeenAt = new Date(
+      Math.max(...group.map((story) => new Date(story.last_seen_at).getTime()))
+    ).toISOString();
+    const mergedSummary =
+      group.find((story) => story.editor_summary)?.editor_summary ??
+      group.find((story) => story.summary)?.summary ??
+      null;
+    const mergedPreviewText =
+      group.find((story) => story.preview_text)?.preview_text ??
+      mergedSummary;
+    const mergedPreview =
+      group.find((story) => story.preview_type === "full" || story.preview_type === "excerpt") ??
+      group.find((story) => story.preview_type === "headline_only") ??
+      primary;
+    const homepageRankCandidates = group
+      .map((story) => (Number.isFinite(Number(story.homepage_rank ?? null)) ? Number(story.homepage_rank) : null))
+      .filter((value): value is number => value != null && value > 0);
+    const homepageRank = homepageRankCandidates.length > 0 ? Math.min(...homepageRankCandidates) : null;
+    const homepageRankedAtCandidates = group
+      .map((story) => story.homepage_ranked_at)
+      .filter((value): value is string => Boolean(value))
+      .sort();
+    const homepageRankedAt =
+      homepageRankedAtCandidates.length > 0
+        ? homepageRankedAtCandidates[homepageRankedAtCandidates.length - 1]
+        : null;
+    const sourceFamilyCount = countSourceFamilies(sourceDomains);
+    const ranking = analyzeNewsletterStoryRanking({
+      title: String(primary.editor_title ?? primary.title ?? "").trim() || primary.title,
+      summary: mergedSummary,
+      articleCount,
+      sourceCount: sourceDomains.length,
+      familyCount: sourceFamilyCount,
+      recentCount,
+      avgWeight,
+      latestAt: new Date(latestAt)
+    });
+
+    collapsed.push({
+      ...primary,
+      story_ids: storyIds,
+      summary: mergedSummary,
+      preview_text: mergedPreviewText,
+      preview_type: mergedPreview.preview_type ?? primary.preview_type,
+      preview_confidence: mergedPreview.preview_confidence ?? primary.preview_confidence,
+      first_seen_at: firstSeenAt,
+      last_seen_at: lastSeenAt,
+      article_count: articleCount,
+      source_count: sourceDomains.length,
+      source_family_count: sourceFamilyCount,
+      source_domains: sourceDomains,
+      recent_count: recentCount,
+      avg_weight: Number(avgWeight.toFixed(2)),
+      latest_at: latestAt,
+      score: ranking.score,
+      newsletter_score: ranking.score,
+      homepage_rank: homepageRank,
+      homepage_ranked_at: homepageRankedAt,
+      story_type: ranking.storyType,
+      lead_urgency_override: ranking.urgencyOverride,
+      why_ranked: ranking.whyRanked
+    });
+  }
+
+  return collapsed;
+}
+
+function sortNewsletterCandidatesForSelection<T extends StoryRow>(stories: T[]) {
+  return [...stories].sort((a, b) => {
+    const scoreDiff = Number(b.score ?? 0) - Number(a.score ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const familyDiff =
+      Math.max(0, Number(b.source_family_count ?? 0)) - Math.max(0, Number(a.source_family_count ?? 0));
+    if (familyDiff !== 0) return familyDiff;
+
+    const sourceDiff = Math.max(0, Number(b.source_count ?? 0)) - Math.max(0, Number(a.source_count ?? 0));
+    if (sourceDiff !== 0) return sourceDiff;
+
+    const articleDiff = Math.max(0, Number(b.article_count ?? 0)) - Math.max(0, Number(a.article_count ?? 0));
+    if (articleDiff !== 0) return articleDiff;
+
+    return new Date(b.latest_at).getTime() - new Date(a.latest_at).getTime();
+  });
+}
+
 function selectDiverseTopStories(stories: StoryRow[], limit: number) {
   const boundedLimit = Math.max(1, limit);
   if (stories.length <= boundedLimit) return stories.slice(0, boundedLimit);
@@ -1320,7 +1468,7 @@ export async function getNewsletterMenuStories(
 ): Promise<NewsletterMenuResponse> {
   const boundedLimit = Math.min(Math.max(Math.floor(options.limit ?? NEWSLETTER_MENU_DEFAULT_LIMIT), 10), 50);
   const boundedDaysBack = Math.min(Math.max(Math.floor(options.daysBack ?? NEWSLETTER_MENU_DEFAULT_DAYS), 3), 14);
-  const candidateLimit = Math.min(240, Math.max(boundedLimit * 6, 120));
+  const candidateLimit = Math.min(400, Math.max(boundedLimit * 10, 200));
   const generatedAt = new Date().toISOString();
   const rankColumnsAvailable = await hasHomepageRankColumns();
   const homepageRankSelect = rankColumnsAvailable
@@ -1525,15 +1673,19 @@ export async function getNewsletterMenuStories(
         homepage_ranked_at: (row.homepage_ranked_at as string | null | undefined) ?? null,
         story_type: ranking.storyType,
         lead_urgency_override: ranking.urgencyOverride,
-        why_ranked: ranking.whyRanked
+        why_ranked: ranking.whyRanked,
+        story_ids: [row.id]
       } satisfies NewsletterStoryCandidate];
     })
     .filter((story) => story.story_type !== "opinion" && story.story_type !== "evergreen");
 
-  const diversityWeighted = applyTopicSimilarityPenalty(scored);
-  const selected = selectDiverseTopStories(diversityWeighted, boundedLimit) as NewsletterStoryCandidate[];
+  const collapsed = collapseExactTitleDuplicateNewsletterCandidates(scored);
+  const prioritized = sortNewsletterCandidatesForSelection(collapsed);
+  const diversityWeighted = applyTopicSimilarityPenalty(prioritized);
+  const selectionPool = sortNewsletterCandidatesForSelection(diversityWeighted);
+  const selected = selectDiverseTopStories(selectionPool, boundedLimit) as NewsletterStoryCandidate[];
   const articleMap = await loadNewsletterMenuArticles(
-    selected.map((story) => story.id),
+    Array.from(new Set(selected.flatMap((story) => story.story_ids ?? [story.id]))),
     boundedDaysBack
   );
 
@@ -1544,7 +1696,18 @@ export async function getNewsletterMenuStories(
     window_days: boundedDaysBack,
     limit: boundedLimit,
     stories: selected.map((story, index) => {
-      const articles = articleMap.get(story.id) ?? [];
+      const articleIndex = new Map<string, NewsletterMenuArticle>();
+      for (const storyId of story.story_ids ?? [story.id]) {
+        for (const article of articleMap.get(storyId) ?? []) {
+          if (!articleIndex.has(article.url)) {
+            articleIndex.set(article.url, article);
+          }
+        }
+      }
+      const articles = Array.from(articleIndex.values()).sort((a, b) => {
+        if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
+        return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
+      });
       const primaryArticle = articles.find((article) => article.is_primary) ?? articles[0] ?? null;
       const supportingArticles = articles
         .filter((article) => !primaryArticle || article.url !== primaryArticle.url)

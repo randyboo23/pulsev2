@@ -59,6 +59,7 @@ export type NewsletterRankingBreakdown = {
   avgWeight: number;
   authorityMultiplier: number;
   momentumBonus: number;
+  coverageBoost: number;
   evergreenPenalty: number;
   singletonPenalty: number;
   singleSourcePenalty: number;
@@ -472,6 +473,14 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
   const edtechFit = storyMatchesAudience(text, "edtech") ? 1 : 0;
   const operatorFit = Math.min(1.2, adminFit * 0.75 + teacherFit * 0.35 + edtechFit * 0.35);
   const momentumBonus = 1 + Math.min(0.18, Math.max(0, recentCount - 1) * 0.05);
+  const coverageBoost =
+    independentSourceCount >= 4
+      ? 1.45
+      : independentSourceCount === 3
+        ? 1.32
+        : independentSourceCount === 2
+          ? 1.16
+          : 1;
 
   const base =
     impact * 2.6 +
@@ -491,13 +500,14 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
     singleSourcePenalty *
     thinCoveragePenalty *
     hardNewsPenalty *
-    momentumBonus;
+    momentumBonus *
+    coverageBoost;
 
   const whyRanked: NewsletterRankingReason[] = [];
   if (impact >= 2) whyRanked.push("high_impact");
   if (policyHits > 0) whyRanked.push("policy");
   if (urgency > 0 && (hoursSince <= 72 || recentCount >= 2)) whyRanked.push("urgent");
-  if (independentSourceCount >= 3 || sourceCount >= 3) whyRanked.push("multi_source");
+  if (independentSourceCount >= 2 || sourceCount >= 2) whyRanked.push("multi_source");
   if (adminFit > 0 && (impact > 0 || policyHits > 0)) whyRanked.push("district_impact");
   if (teacherFit > 0 && adminFit === 0) whyRanked.push("classroom_relevance");
   if (edtechFit > 0) whyRanked.push("edtech");
@@ -522,6 +532,7 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
       avgWeight: Number(baseWeight.toFixed(2)),
       authorityMultiplier: Number(authorityMultiplier.toFixed(2)),
       momentumBonus: Number(momentumBonus.toFixed(2)),
+      coverageBoost: Number(coverageBoost.toFixed(2)),
       evergreenPenalty: Number(evergreenPenalty.toFixed(2)),
       singletonPenalty: Number(singletonPenalty.toFixed(2)),
       singleSourcePenalty: Number(singleSourcePenalty.toFixed(2)),

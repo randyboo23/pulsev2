@@ -69,6 +69,7 @@ Last updated: 2026-03-11
 - Relevance weight: 1.3x.
 - AI reranker (Sonnet) now runs at ingest-time and persists homepage order in `stories.homepage_rank`.
 - Newsletter menu now has a dedicated weekly ranking profile over a 7-day story slice, with gentler recency decay and the same diversity/source-quality guardrails used by homepage ranking.
+- Newsletter ranking `newsletter_v2` now widens the scored candidate pool, boosts corroborated `2+` source-family stories more aggressively, and applies coverage-aware ordering before newsletter-only diversity penalties.
 - Unknown source default weight: 0.7.
 
 ## AI Relevance Gate
@@ -180,3 +181,4 @@ Last updated: 2026-03-11
 - 2026-03-07: Added AP-wire topical guardrails: AP education feed items now run relevance checks in ingest, and Latest Wire hides AP rows that have neither K-12 topical signal nor strong relevance score.
 - 2026-03-11: Added `GET /api/newsletter/menu` with a dedicated weekly ranking profile, primary/supporting article metadata, and `newsletter_menu_generated` snapshot logging in `admin_events` for future editor-feedback capture.
 - 2026-03-11: Tightened K-12 topical filtering across ingest, Latest Wire, and newsletter menu to block AP sports/politics/international leaks plus higher-ed/event/crime false positives; added `qa:k12-relevance` regression coverage for those cases.
+- 2026-03-11: Added `qa:newsletter-coverage`, a live DB audit for newsletter/homepage source mix plus likely unmerged single-source stories; current live audit shows the corroborated-story pool is genuinely thin, not just under-promoted.

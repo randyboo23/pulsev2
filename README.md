@@ -93,6 +93,7 @@ Techmeme for US K-12 education news.
   - `menu_id`
   - `ranking_version`
   - ranked stories with `why_ranked`, weekly score, source counts, and primary/supporting article links
+- Current ranking version: `newsletter_v2` (wider candidate scan + stronger corroboration boosts for `2+` source-family stories)
 - Intended workflow:
   - Cowork/editor fetches the weekly menu
   - shortlists stories for the issue
@@ -120,6 +121,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Optional extra check: `npm run qa:grouping` (fixture-based merge regression guardrail)
 - Optional extra check: `npm run qa:k12-relevance` (fixture-based K-12 topical filter guardrail)
 - Optional extra check: `npm run qa:newsletter-ranking` (fixture-based weekly newsletter ranking guardrail)
+- Optional live audit: `npm run qa:newsletter-coverage` (requires local `.env`; shows newsletter/homepage source mix and likely unmerged single-source stories)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
 - Optional extra check: `npm run qa:source-family` (fixture-based source-family dedupe guardrail)
 - Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
