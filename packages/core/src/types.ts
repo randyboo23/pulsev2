@@ -3,6 +3,8 @@ export type SourceTier = "A" | "B" | "C" | "unknown";
 export type ArticleStatus = "new" | "enriched" | "blocked" | "error";
 
 export type Audience = "teachers" | "admins" | "edtech";
+export type NewsletterLane = "policy" | "classroom" | "edtech" | "leadership";
+export type NewsletterStoryType = "breaking" | "policy" | "feature" | "evergreen" | "opinion";
 
 export type ArticleCandidate = {
   provider: "rss" | "iframely" | "firecrawl" | "llm";
@@ -73,6 +75,23 @@ export type NewsletterMenuArticle = {
   is_primary: boolean;
 };
 
+export type NewsletterMenuQuery = {
+  audience: Audience | null;
+  lane: NewsletterLane | null;
+  min_source_count: number | null;
+  exclude_story_ids: string[];
+  exclude_story_types: NewsletterStoryType[];
+};
+
+export type NewsletterMenuPoolStats = {
+  candidate_count: number;
+  filtered_count: number;
+  returned_count: number;
+  multi_source_candidates: number;
+  multi_source_filtered: number;
+  multi_source_returned: number;
+};
+
 export type NewsletterMenuStory = {
   menu_rank: number;
   newsletter_score: number;
@@ -82,12 +101,13 @@ export type NewsletterMenuStory = {
   summary: string | null;
   preview_type: "full" | "excerpt" | "headline_only" | "synthetic" | null;
   preview_confidence: number | null;
-  story_type: "breaking" | "policy" | "feature" | "evergreen" | "opinion";
+  story_type: NewsletterStoryType;
   status: string | null;
   article_count: number;
   source_count: number;
   source_family_count: number;
   source_domains: string[];
+  matched_lanes: NewsletterLane[];
   latest_at: string;
   homepage_rank: number | null;
   homepage_ranked_at: string | null;
@@ -101,5 +121,7 @@ export type NewsletterMenuResponse = {
   ranking_version: string;
   window_days: number;
   limit: number;
+  query: NewsletterMenuQuery;
+  pool_stats: NewsletterMenuPoolStats;
   stories: NewsletterMenuStory[];
 };

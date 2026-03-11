@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { analyzeNewsletterStoryRanking } from "../apps/web/src/lib/ranking.ts";
+import { analyzeNewsletterStoryRanking, inferNewsletterLanes } from "../apps/web/src/lib/ranking.ts";
 
 const strongPolicy = analyzeNewsletterStoryRanking({
   title: "State Board Advances School Funding Bill After District Budget Warning",
@@ -66,6 +66,32 @@ const urgentStory = analyzeNewsletterStoryRanking({
 assert.ok(
   urgentStory.whyRanked.includes("urgent"),
   "Expected emergency story to include urgent reason"
+);
+
+const edtechLanes = inferNewsletterLanes({
+  title: "District Expands Student Data Privacy Rules for Classroom AI Tools",
+  summary: "School leaders approved new guidance for vendors and teacher use of AI software.",
+  storyType: "policy",
+  whyRanked: ["policy", "district_impact", "edtech"]
+});
+
+assert.deepEqual(
+  edtechLanes,
+  ["policy", "classroom", "leadership", "edtech"],
+  `Expected EdTech policy story to map to multiple newsletter lanes (${JSON.stringify(edtechLanes)})`
+);
+
+const classroomLanes = inferNewsletterLanes({
+  title: "Teachers Use New Literacy Routine to Build Student Fluency",
+  summary: "The classroom strategy is spreading through coaching and curriculum teams.",
+  storyType: "feature",
+  whyRanked: ["classroom_relevance"]
+});
+
+assert.deepEqual(
+  classroomLanes,
+  ["classroom"],
+  `Expected classroom feature to stay in classroom lane (${JSON.stringify(classroomLanes)})`
 );
 
 console.log("newsletter-ranking regression checks passed");

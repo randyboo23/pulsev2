@@ -1,4 +1,4 @@
-import type { NewsletterRankingReason } from "@pulse/core";
+import type { NewsletterLane, NewsletterRankingReason } from "@pulse/core";
 
 export type RankingInputs = {
   title: string;
@@ -220,6 +220,55 @@ export function storyMatchesAudience(text: string, audience: Audience) {
 
   const terms = AUDIENCE_KEYWORDS[audience] ?? [];
   return terms.some((term) => containsWholeAudienceTerm(lowered, term));
+}
+
+const NEWSLETTER_POLICY_TERMS = [
+  "bill",
+  "law",
+  "lawsuit",
+  "funding",
+  "budget",
+  "board",
+  "regulation",
+  "state",
+  "federal",
+  "court",
+  "mandate"
+] as const;
+
+export function inferNewsletterLanes(params: {
+  title: string;
+  summary: string | null;
+  storyType?: StoryType | null;
+  whyRanked?: NewsletterRankingReason[] | null;
+}): NewsletterLane[] {
+  const text = `${params.title} ${params.summary ?? ""}`.toLowerCase();
+  const storyType = params.storyType ?? null;
+  const whyRanked = params.whyRanked ?? [];
+  const lanes: NewsletterLane[] = [];
+
+  if (
+    storyType === "policy" ||
+    storyType === "breaking" ||
+    whyRanked.includes("policy") ||
+    NEWSLETTER_POLICY_TERMS.some((term) => containsWholeAudienceTerm(text, term))
+  ) {
+    lanes.push("policy");
+  }
+
+  if (storyMatchesAudience(text, "teachers") || whyRanked.includes("classroom_relevance")) {
+    lanes.push("classroom");
+  }
+
+  if (storyMatchesAudience(text, "admins") || whyRanked.includes("district_impact")) {
+    lanes.push("leadership");
+  }
+
+  if (storyMatchesAudience(text, "edtech") || whyRanked.includes("edtech")) {
+    lanes.push("edtech");
+  }
+
+  return Array.from(new Set(lanes));
 }
 
 const KEYWORDS = {

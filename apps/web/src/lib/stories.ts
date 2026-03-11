@@ -1,13 +1,19 @@
 import "server-only";
 import type {
+  Audience as SharedAudience,
+  NewsletterLane,
   NewsletterMenuArticle,
+  NewsletterMenuPoolStats,
   NewsletterMenuResponse,
-  NewsletterRankingReason
+  NewsletterMenuQuery,
+  NewsletterRankingReason,
+  NewsletterStoryType
 } from "@pulse/core";
 import { pool } from "./db";
 import {
   analyzeNewsletterStoryRanking,
   analyzeStoryRanking,
+  inferNewsletterLanes,
   storyMatchesAudience,
   type Audience,
   type StoryType
@@ -133,7 +139,7 @@ const TRAILING_BOILERPLATE_PATTERNS = [
 
 const MIN_PREVIEW_CONFIDENCE = Number(process.env.PREVIEW_MIN_CONFIDENCE ?? "0.58");
 const HOMEPAGE_RANK_COLUMN_CHECK_TTL_MS = 60_000;
-export const NEWSLETTER_RANKING_VERSION = "newsletter_v2";
+export const NEWSLETTER_RANKING_VERSION = "newsletter_v3";
 export const NEWSLETTER_MENU_DEFAULT_LIMIT = 30;
 export const NEWSLETTER_MENU_DEFAULT_DAYS = 7;
 
@@ -326,6 +332,7 @@ type NewsletterStoryCandidate = StoryRow & {
   newsletter_score: number;
   why_ranked: NewsletterRankingReason[];
   source_domains: string[];
+  matched_lanes: NewsletterLane[];
   story_ids: string[];
 };
 
@@ -1036,6 +1043,12 @@ function collapseExactTitleDuplicateNewsletterCandidates(stories: NewsletterStor
       avgWeight,
       latestAt: new Date(latestAt)
     });
+    const matchedLanes = inferNewsletterLanes({
+      title: String(primary.editor_title ?? primary.title ?? "").trim() || primary.title,
+      summary: mergedSummary,
+      storyType: ranking.storyType,
+      whyRanked: ranking.whyRanked
+    });
 
     collapsed.push({
       ...primary,
@@ -1059,7 +1072,8 @@ function collapseExactTitleDuplicateNewsletterCandidates(stories: NewsletterStor
       homepage_ranked_at: homepageRankedAt,
       story_type: ranking.storyType,
       lead_urgency_override: ranking.urgencyOverride,
-      why_ranked: ranking.whyRanked
+      why_ranked: ranking.whyRanked,
+      matched_lanes: matchedLanes
     });
   }
 
@@ -1406,7 +1420,22 @@ type NewsletterMenuOptions = {
   menuId: string;
   limit?: number;
   daysBack?: number;
+  audience?: SharedAudience | null;
+  lane?: NewsletterLane | null;
+  minSourceCount?: number | null;
+  excludeStoryIds?: string[];
+  excludeStoryTypes?: NewsletterStoryType[];
 };
+
+function isNewsletterStoryType(value: string): value is NewsletterStoryType {
+  return (
+    value === "breaking" ||
+    value === "policy" ||
+    value === "feature" ||
+    value === "evergreen" ||
+    value === "opinion"
+  );
+}
 
 async function loadNewsletterMenuArticles(storyIds: string[], daysBack: number) {
   const grouped = new Map<string, NewsletterMenuArticle[]>();
@@ -1468,7 +1497,36 @@ export async function getNewsletterMenuStories(
 ): Promise<NewsletterMenuResponse> {
   const boundedLimit = Math.min(Math.max(Math.floor(options.limit ?? NEWSLETTER_MENU_DEFAULT_LIMIT), 10), 50);
   const boundedDaysBack = Math.min(Math.max(Math.floor(options.daysBack ?? NEWSLETTER_MENU_DEFAULT_DAYS), 3), 14);
-  const candidateLimit = Math.min(400, Math.max(boundedLimit * 10, 200));
+  const normalizedAudience =
+    options.audience === "teachers" || options.audience === "admins" || options.audience === "edtech"
+      ? options.audience
+      : null;
+  const normalizedLane =
+    options.lane === "policy" ||
+    options.lane === "classroom" ||
+    options.lane === "edtech" ||
+    options.lane === "leadership"
+      ? options.lane
+      : null;
+  const normalizedMinSourceCount =
+    Number.isFinite(options.minSourceCount ?? null) && Number(options.minSourceCount) > 0
+      ? Math.max(1, Math.floor(Number(options.minSourceCount)))
+      : null;
+  const excludedStoryIds = new Set(
+    (options.excludeStoryIds ?? [])
+      .map((storyId) => String(storyId ?? "").trim())
+      .filter((storyId) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storyId))
+  );
+  const excludedStoryTypes = new Set(
+    (options.excludeStoryTypes ?? [])
+      .map((storyType) => String(storyType ?? "").trim().toLowerCase())
+      .filter(isNewsletterStoryType)
+  );
+  const filterMultiplier =
+    normalizedAudience || normalizedLane || normalizedMinSourceCount || excludedStoryIds.size > 0 || excludedStoryTypes.size > 0
+      ? 14
+      : 10;
+  const candidateLimit = Math.min(600, Math.max(boundedLimit * filterMultiplier, 200));
   const generatedAt = new Date().toISOString();
   const rankColumnsAvailable = await hasHomepageRankColumns();
   const homepageRankSelect = rankColumnsAvailable
@@ -1645,6 +1703,12 @@ export async function getNewsletterMenuStories(
         avgWeight: Number(row.avg_weight ?? 1),
         latestAt: new Date(row.latest_at)
       });
+      const matchedLanes = inferNewsletterLanes({
+        title: displayTitle,
+        summary: resolvedSummary,
+        storyType: ranking.storyType,
+        whyRanked: ranking.whyRanked
+      });
 
       return [{
         id: row.id,
@@ -1674,20 +1738,52 @@ export async function getNewsletterMenuStories(
         story_type: ranking.storyType,
         lead_urgency_override: ranking.urgencyOverride,
         why_ranked: ranking.whyRanked,
+        matched_lanes: matchedLanes,
         story_ids: [row.id]
       } satisfies NewsletterStoryCandidate];
     })
     .filter((story) => story.story_type !== "opinion" && story.story_type !== "evergreen");
 
   const collapsed = collapseExactTitleDuplicateNewsletterCandidates(scored);
-  const prioritized = sortNewsletterCandidatesForSelection(collapsed);
+  const candidateCount = collapsed.length;
+  const filtered = collapsed.filter((story) => {
+    const displayTitle = story.editor_title ?? story.title;
+    const displaySummary = story.editor_summary ?? story.summary;
+    const audienceText = `${displayTitle} ${displaySummary ?? ""}`;
+    const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+    const isExcludedById = (story.story_ids ?? [story.id]).some((storyId) => excludedStoryIds.has(storyId));
+    if (isExcludedById) return false;
+    if (excludedStoryTypes.has((story.story_type ?? "feature") as NewsletterStoryType)) return false;
+    if (normalizedAudience && !storyMatchesAudience(audienceText, normalizedAudience as Audience)) return false;
+    if (normalizedLane && !(story.matched_lanes ?? []).includes(normalizedLane)) return false;
+    if (normalizedMinSourceCount && sourceCount < normalizedMinSourceCount) return false;
+    return true;
+  });
+  const poolStats: NewsletterMenuPoolStats = {
+    candidate_count: candidateCount,
+    filtered_count: filtered.length,
+    returned_count: 0,
+    multi_source_candidates: collapsed.filter((story) => Math.max(0, Number(story.source_count ?? 0)) >= 2).length,
+    multi_source_filtered: filtered.filter((story) => Math.max(0, Number(story.source_count ?? 0)) >= 2).length,
+    multi_source_returned: 0
+  };
+  const prioritized = sortNewsletterCandidatesForSelection(filtered);
   const diversityWeighted = applyTopicSimilarityPenalty(prioritized);
   const selectionPool = sortNewsletterCandidatesForSelection(diversityWeighted);
   const selected = selectDiverseTopStories(selectionPool, boundedLimit) as NewsletterStoryCandidate[];
+  poolStats.returned_count = selected.length;
+  poolStats.multi_source_returned = selected.filter((story) => Math.max(0, Number(story.source_count ?? 0)) >= 2).length;
   const articleMap = await loadNewsletterMenuArticles(
     Array.from(new Set(selected.flatMap((story) => story.story_ids ?? [story.id]))),
     boundedDaysBack
   );
+  const query: NewsletterMenuQuery = {
+    audience: normalizedAudience,
+    lane: normalizedLane,
+    min_source_count: normalizedMinSourceCount,
+    exclude_story_ids: Array.from(excludedStoryIds),
+    exclude_story_types: Array.from(excludedStoryTypes)
+  };
 
   return {
     menu_id: options.menuId,
@@ -1695,6 +1791,8 @@ export async function getNewsletterMenuStories(
     ranking_version: NEWSLETTER_RANKING_VERSION,
     window_days: boundedDaysBack,
     limit: boundedLimit,
+    query,
+    pool_stats: poolStats,
     stories: selected.map((story, index) => {
       const articleIndex = new Map<string, NewsletterMenuArticle>();
       for (const storyId of story.story_ids ?? [story.id]) {
@@ -1728,6 +1826,7 @@ export async function getNewsletterMenuStories(
         source_count: story.source_count,
         source_family_count: story.source_family_count ?? 0,
         source_domains: story.source_domains,
+        matched_lanes: story.matched_lanes ?? [],
         latest_at: story.latest_at,
         homepage_rank: story.homepage_rank ?? null,
         homepage_ranked_at: story.homepage_ranked_at ?? null,
@@ -1750,12 +1849,15 @@ export async function recordNewsletterMenuSnapshot(menu: NewsletterMenuResponse)
           ranking_version: menu.ranking_version,
           window_days: menu.window_days,
           limit: menu.limit,
+          query: menu.query,
+          pool_stats: menu.pool_stats,
           story_ids: menu.stories.map((story) => story.story_id),
           stories: menu.stories.map((story) => ({
             menu_rank: story.menu_rank,
             newsletter_score: story.newsletter_score,
             story_id: story.story_id,
             title: story.title,
+            matched_lanes: story.matched_lanes,
             primary_url: story.primary_article?.url ?? null
           }))
         })

@@ -89,15 +89,26 @@ Techmeme for US K-12 education news.
 - Query params:
   - `limit` (default `30`, bounded `10..50`)
   - `days` (default `7`, bounded `3..14`)
+  - `audience` (`teachers|admins|edtech`)
+  - `lane` (`policy|classroom|edtech|leadership`)
+  - `min_source_count` (optional; bounded `1..10`)
+  - `exclude_story_ids` (repeatable or comma-separated UUID list)
+  - `exclude_story_type` (repeatable or comma-separated `breaking|policy|feature|evergreen|opinion`)
 - Response includes:
   - `menu_id`
   - `ranking_version`
-  - ranked stories with `why_ranked`, weekly score, source counts, and primary/supporting article links
-- Current ranking version: `newsletter_v2` (wider candidate scan + stronger corroboration boosts for `2+` source-family stories)
+  - `query` echo of the applied filters
+  - `pool_stats` with candidate/filtered/returned counts and multi-source counts
+  - ranked stories with `matched_lanes`, `why_ranked`, weekly score, source counts, and primary/supporting article links
+- Current ranking version: `newsletter_v3` (same weekly ranking profile, now with queryable lane/audience/source filters and response-level pool stats)
 - Intended workflow:
   - Cowork/editor fetches the weekly menu
   - shortlists stories for the issue
   - uses returned links and summaries to draft Beehiiv-ready blurbs
+- Examples:
+  - broad weekly menu: `/api/newsletter/menu?days=7&limit=30`
+  - supplemental EdTech pull: `/api/newsletter/menu?days=7&limit=12&lane=edtech`
+  - corroborated policy-only pull: `/api/newsletter/menu?days=7&limit=12&lane=policy&min_source_count=2`
 - Each generated menu is also logged to `admin_events` as `newsletter_menu_generated` so future feedback can attach to the exact menu snapshot that was shown.
 
 ## Automation (Recommended)

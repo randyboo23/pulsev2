@@ -82,7 +82,8 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
                                                 with gentler weekly recency, wider candidate scan,
                                                 stronger corroboration boosts, source-family weighting,
                                                 homepage diversity guards, a strict K-12 topical gate,
-                                                and primary/supporting article links
+                                                primary/supporting article links, and editorial query filters
+                                                (`lane`, `audience`, `min_source_count`, exclude lists)
                                                 snapshot logged to `admin_events` for later editor feedback
 ```
 
@@ -97,7 +98,7 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
   - Admin trigger calls `fillStorySummaries()` for top stories only.
 - Weekly newsletter menu:
   - Editor/Cowork calls `GET /api/newsletter/menu` with `Authorization: Bearer <NEWSLETTER_SECRET>` or `x-newsletter-secret`.
-  - Route returns ranked weekly story menu JSON and logs the generated menu snapshot to `admin_events`.
+  - Route returns ranked weekly story menu JSON with applied query metadata + pool stats, and logs the generated menu snapshot to `admin_events`.
 
 ## Pages
 
@@ -191,6 +192,7 @@ scripts/
 - Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text and lead metadata.
 - Homepage audience views (`/?audience=teachers|admins|edtech`) reuse `getTopStories()`, but audience matching is boundary-aware; `edtech` additionally requires K-12 tech context instead of naive substring hits.
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
+- Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
