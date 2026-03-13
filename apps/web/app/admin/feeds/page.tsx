@@ -51,6 +51,7 @@ export default async function AdminFeedsPage() {
           <div className="tagline">Admin · Feeds</div>
         </div>
         <div className="filters">
+          <a className="filter" href="/admin/newsletter">Newsletter</a>
           <a className="filter" href="/admin/stories">Stories</a>
           <a className="filter" href="/admin/sources">Sources</a>
           <a className="filter" href="/">Home</a>

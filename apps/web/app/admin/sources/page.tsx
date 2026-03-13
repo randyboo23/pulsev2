@@ -34,6 +34,7 @@ export default async function AdminSourcesPage() {
           <div className="tagline">Admin · Sources</div>
         </div>
         <div className="filters">
+          <a className="filter" href="/admin/newsletter">Newsletter</a>
           <a className="filter" href="/admin/feeds">Feeds</a>
           <a className="filter" href="/admin/stories">Stories</a>
           <a className="filter" href="/">Home</a>

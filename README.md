@@ -111,6 +111,17 @@ Techmeme for US K-12 education news.
   - corroborated policy-only pull: `/api/newsletter/menu?days=7&limit=12&lane=policy&min_source_count=2`
 - Each generated menu is also logged to `admin_events` as `newsletter_menu_generated` so future feedback can attach to the exact menu snapshot that was shown.
 
+## Admin Newsletter Review
+- Route: `/admin/newsletter`
+- Auth: existing admin login cookie (`ADMIN_SECRET` flow), no `NEWSLETTER_SECRET` needed in the editor workflow
+- Purpose:
+  - pull the weekly menu server-side inside admin
+  - review broad or filtered pulls (`lane`, `audience`, `min_source_count`, hide features)
+  - open primary/supporting links without depending on Cowork outbound network access
+- Current scope:
+  - reliable in-app menu review and filtering
+  - drafting and Beehiiv export still happen outside the admin panel for now
+
 ## Automation (Recommended)
 - Use a scheduler to hit `/api/ingest` every 30 minutes.
 - Set `CRON_SECRET` in your deployment env vars.

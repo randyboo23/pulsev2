@@ -99,6 +99,9 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
 - Weekly newsletter menu:
   - Editor/Cowork calls `GET /api/newsletter/menu` with `Authorization: Bearer <NEWSLETTER_SECRET>` or `x-newsletter-secret`.
   - Route returns ranked weekly story menu JSON with applied query metadata + pool stats, and logs the generated menu snapshot to `admin_events`.
+- Admin newsletter review:
+  - Editor loads `/admin/newsletter` after standard admin login.
+  - Page calls `getNewsletterMenuStories()` server-side, bypassing Cowork/custom-domain network issues and avoiding any browser-visible newsletter secret.
 
 ## Pages
 
@@ -107,6 +110,7 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
 | `/` | Complete | Homepage with masthead, nav, newsletter bar, featured story, story grid, wire sidebar |
 | `/stories/[id]` | Complete | Story detail with sources list (deduped for single-source stories) |
 | `/admin/stories` | Functional | Uses legacy classes, works fine |
+| `/admin/newsletter` | Functional | Editor-facing weekly menu review with server-side ranking and filters |
 | `/admin/sources` | Functional | Uses legacy classes |
 | `/about` | Complete | Editorial about page |
 | `/newsletter` | External | Nav/footer link to Beehiiv newsletter (pulsek12.com) |
@@ -193,6 +197,7 @@ scripts/
 - Homepage audience views (`/?audience=teachers|admins|edtech`) reuse `getTopStories()`, but audience matching is boundary-aware; `edtech` additionally requires K-12 tech context instead of naive substring hits.
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.
+- `/admin/newsletter` reuses that same lib call directly on the server, exposing only editor-friendly controls (`days`, `limit`, `lane`, `audience`, `min_source_count`, hide features) and rendering the ranked stories in-app.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
@@ -201,6 +206,7 @@ scripts/
 ## Notes
 - Newsletter subscribe uses Beehiiv API via server-side proxy (`/api/newsletter/subscribe`). Requires `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID` env vars.
 - Newsletter menu requires `NEWSLETTER_SECRET`; generated menus are logged in `admin_events` under `newsletter_menu_generated` for later feedback attachment.
+- Admin newsletter review does not require `NEWSLETTER_SECRET` because it is gated by the existing admin cookie and reads the menu server-side.
 - SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.

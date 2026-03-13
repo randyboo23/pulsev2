@@ -622,6 +622,7 @@ export default async function AdminStoriesPage() {
           <div className="tagline">Admin · Stories</div>
         </div>
         <div className="filters">
+          <a className="filter" href="/admin/newsletter">Newsletter</a>
           <a className="filter" href="/admin/feeds">Feeds</a>
           <a className="filter" href="/admin/sources">Sources</a>
           <a className="filter" href="/">Home</a>
