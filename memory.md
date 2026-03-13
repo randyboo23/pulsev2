@@ -110,6 +110,7 @@ Last updated: 2026-03-11
 - `/admin/stories` now uses scan-friendly metric cards for guardrail stats, explicit action buttons for clickable controls, and collapses low-frequency actions (`hide`, maintenance jobs) into "More actions" areas.
 - `/admin/stories` now includes a one-click "Send top-story LinkedIn draft" action that emails a copy/paste post for the highest-source story in the current top-story window.
 - `/admin/newsletter` now gives editors a stable in-app weekly menu view that reuses `getNewsletterMenuStories()` server-side, with lane/audience/source filters and primary/supporting article links, so newsletter review no longer depends on Cowork network access.
+- `/admin/newsletter` now stores the latest shortlist draft and manual-add URLs in `admin_events` (`newsletter_menu_feedback_draft`) keyed by `menu_id`; this is the first persisted feedback loop for newsletter tuning.
 - Ingest now can send LinkedIn-ready draft emails (copy/paste text) when a top-ranked story meets a minimum source threshold (default `>=3`), with one-send-per-story dedupe.
 - Admin submit buttons now show inline pending + short success confirmation states so editors can tell actions were triggered without leaving the page.
 
@@ -188,3 +189,4 @@ Last updated: 2026-03-11
 - 2026-03-11: Added `qa:newsletter-coverage`, a live DB audit for newsletter/homepage source mix plus likely unmerged single-source stories; current live audit shows the corroborated-story pool is genuinely thin, not just under-promoted.
 - 2026-03-11: Fixed `audience=edtech` false positives caused by substring matching (`ai` inside words like `statewide`/`Mamdani`), removed audience-page fallback to the unfiltered homepage set, and added `qa:audience` regression coverage.
 - 2026-03-13: Added `/admin/newsletter`, an editor-facing weekly menu page that calls newsletter ranking server-side behind admin auth and exposes the most useful filters without requiring Cowork or direct API access.
+- 2026-03-13: Extended `/admin/newsletter` with persisted shortlist drafts and manual-add capture in `admin_events`, keeping storage lightweight while the editorial workflow settles.

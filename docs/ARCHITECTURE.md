@@ -102,6 +102,7 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
 - Admin newsletter review:
   - Editor loads `/admin/newsletter` after standard admin login.
   - Page calls `getNewsletterMenuStories()` server-side, bypassing Cowork/custom-domain network issues and avoiding any browser-visible newsletter secret.
+  - Editor can save a shortlist + manual URLs against the current `menu_id`; latest draft is stored in `admin_events` as `newsletter_menu_feedback_draft`.
 
 ## Pages
 
@@ -198,6 +199,7 @@ scripts/
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.
 - `/admin/newsletter` reuses that same lib call directly on the server, exposing only editor-friendly controls (`days`, `limit`, `lane`, `audience`, `min_source_count`, hide features) and rendering the ranked stories in-app.
+- `/admin/newsletter` also persists editor shortlist drafts and manual-add URLs in `admin_events`, keyed by `menu_id`, so feedback capture can start without a new table.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
@@ -207,6 +209,7 @@ scripts/
 - Newsletter subscribe uses Beehiiv API via server-side proxy (`/api/newsletter/subscribe`). Requires `BEEHIIV_API_KEY` and `BEEHIIV_PUBLICATION_ID` env vars.
 - Newsletter menu requires `NEWSLETTER_SECRET`; generated menus are logged in `admin_events` under `newsletter_menu_generated` for later feedback attachment.
 - Admin newsletter review does not require `NEWSLETTER_SECRET` because it is gated by the existing admin cookie and reads the menu server-side.
+- Newsletter draft persistence currently lives in `admin_events` for speed; if the workflow hardens, promote it to a dedicated table.
 - SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.

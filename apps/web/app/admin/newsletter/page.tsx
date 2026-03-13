@@ -2,21 +2,41 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import type { Audience, NewsletterLane, NewsletterRankingReason } from "@pulse/core";
 import { isAdmin } from "@/src/lib/admin";
+import { pool } from "@/src/lib/db";
 import {
   getNewsletterMenuStories,
   NEWSLETTER_MENU_DEFAULT_DAYS,
-  NEWSLETTER_MENU_DEFAULT_LIMIT
+  NEWSLETTER_MENU_DEFAULT_LIMIT,
+  recordNewsletterMenuSnapshot
 } from "@/src/lib/stories";
+import { clearNewsletterDraft, saveNewsletterDraft } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 type AdminNewsletterSearchParams = {
+  menu_id?: string | string[];
   days?: string | string[];
   limit?: string | string[];
   audience?: string | string[];
   lane?: string | string[];
   min_source_count?: string | string[];
   hide_features?: string | string[];
+};
+
+type NewsletterDraftRow = {
+  created_at: string;
+  detail:
+    | {
+        menu_id?: string;
+        selected_story_ids?: string[];
+        selected?: Array<{ story_id?: string; published_rank?: number }>;
+        manual_add_urls?: string[];
+      }
+    | null;
+};
+
+type NewsletterSnapshotExistsRow = {
+  id: string;
 };
 
 function readFirst(value: string | string[] | undefined) {
@@ -47,6 +67,13 @@ function parseLane(value: string | null): NewsletterLane | null {
 
 function parseBooleanFlag(value: string | null) {
   return value === "1" || value === "true" || value === "on";
+}
+
+function parseMenuId(value: string | null) {
+  const normalized = String(value ?? "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized
+    : null;
 }
 
 function formatDateTime(value: string | null) {
@@ -94,6 +121,7 @@ function formatLabel(value: string) {
 }
 
 function buildNewsletterHref(params: {
+  menuId?: string | null;
   days: number;
   limit: number;
   audience: Audience | null;
@@ -102,6 +130,7 @@ function buildNewsletterHref(params: {
   hideFeatures: boolean;
 }) {
   const search = new URLSearchParams();
+  if (params.menuId) search.set("menu_id", params.menuId);
   search.set("days", String(params.days));
   search.set("limit", String(params.limit));
   if (params.audience) search.set("audience", params.audience);
@@ -109,6 +138,79 @@ function buildNewsletterHref(params: {
   if (params.minSourceCount) search.set("min_source_count", String(params.minSourceCount));
   if (params.hideFeatures) search.set("hide_features", "1");
   return `/admin/newsletter?${search.toString()}`;
+}
+
+async function loadNewsletterDraft(menuId: string | null) {
+  if (!menuId) return null;
+
+  const result = await pool.query<NewsletterDraftRow>(
+    `select created_at, detail
+     from admin_events
+     where event_type = 'newsletter_menu_feedback_draft'
+       and detail->>'menu_id' = $1
+     order by created_at desc
+     limit 1`,
+    [menuId]
+  );
+
+  const row = result.rows[0];
+  if (!row?.detail) return null;
+
+  const selectedRows = Array.isArray(row.detail.selected) ? row.detail.selected : [];
+  const selected = selectedRows
+    .map((item) => ({
+      story_id: String(item?.story_id ?? "").trim(),
+      published_rank: Number(item?.published_rank ?? 0)
+    }))
+    .filter(
+      (item) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.story_id) &&
+        Number.isFinite(item.published_rank) &&
+        item.published_rank > 0
+    )
+    .sort((left, right) => left.published_rank - right.published_rank || left.story_id.localeCompare(right.story_id));
+
+  const selectedStoryIds =
+    selected.length > 0
+      ? selected.map((item) => item.story_id)
+      : Array.isArray(row.detail.selected_story_ids)
+        ? row.detail.selected_story_ids
+            .map((item) => String(item ?? "").trim())
+            .filter((item) =>
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item)
+            )
+        : [];
+
+  const manualAddUrls = Array.isArray(row.detail.manual_add_urls)
+    ? row.detail.manual_add_urls
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean)
+    : [];
+
+  return {
+    createdAt: row.created_at,
+    selected,
+    selectedStoryIds,
+    manualAddUrls
+  };
+}
+
+async function ensureNewsletterMenuSnapshot(
+  menu: Awaited<ReturnType<typeof getNewsletterMenuStories>>
+) {
+  const result = await pool.query<NewsletterSnapshotExistsRow>(
+    `select id
+     from admin_events
+     where event_type = 'newsletter_menu_generated'
+       and detail->>'menu_id' = $1
+     order by created_at desc
+     limit 1`,
+    [menu.menu_id]
+  );
+
+  if (result.rows.length === 0) {
+    await recordNewsletterMenuSnapshot(menu);
+  }
 }
 
 export default async function AdminNewsletterPage({
@@ -120,6 +222,7 @@ export default async function AdminNewsletterPage({
     redirect("/admin/login");
   }
 
+  const menuId = parseMenuId(readFirst(searchParams?.menu_id)) ?? randomUUID();
   const daysBack = parseBoundedInt(
     readFirst(searchParams?.days),
     NEWSLETTER_MENU_DEFAULT_DAYS,
@@ -136,13 +239,14 @@ export default async function AdminNewsletterPage({
   const lane = parseLane(readFirst(searchParams?.lane));
   const minSourceCount = parseOptionalBoundedInt(readFirst(searchParams?.min_source_count), 1, 10);
   const hideFeatures = parseBooleanFlag(readFirst(searchParams?.hide_features));
+  const draft = await loadNewsletterDraft(menuId);
 
   let menu: Awaited<ReturnType<typeof getNewsletterMenuStories>> | null = null;
   let loadError: string | null = null;
 
   try {
     menu = await getNewsletterMenuStories({
-      menuId: randomUUID(),
+      menuId,
       limit,
       daysBack,
       audience,
@@ -150,6 +254,7 @@ export default async function AdminNewsletterPage({
       minSourceCount,
       excludeStoryTypes: hideFeatures ? ["feature"] : []
     });
+    await ensureNewsletterMenuSnapshot(menu);
   } catch (error) {
     console.error(
       `[admin/newsletter] failed to load menu: ${error instanceof Error ? error.message : String(error)}`
@@ -172,6 +277,7 @@ export default async function AdminNewsletterPage({
     {
       label: "All lanes",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -184,6 +290,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Policy",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -196,6 +303,7 @@ export default async function AdminNewsletterPage({
     {
       label: "EdTech",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -208,6 +316,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Classroom",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -220,6 +329,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Leadership",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -232,6 +342,7 @@ export default async function AdminNewsletterPage({
     {
       label: "2+ Sources",
       href: buildNewsletterHref({
+        menuId: null,
         days: daysBack,
         limit,
         audience,
@@ -362,6 +473,174 @@ export default async function AdminNewsletterPage({
         </section>
       ) : menu ? (
         <>
+          <section className="card">
+            <h2>Shortlist draft</h2>
+            <p>
+              Save selected stories and any manual URLs against this menu. This is the first half
+              of the feedback loop we can tune from later.
+            </p>
+
+            <form action={saveNewsletterDraft} style={{ marginTop: "16px" }}>
+              <input type="hidden" name="menu_id" value={menuId} />
+              <input type="hidden" name="days" value={String(daysBack)} />
+              <input type="hidden" name="limit" value={String(limit)} />
+              <input type="hidden" name="audience" value={audience ?? ""} />
+              <input type="hidden" name="lane" value={lane ?? ""} />
+              <input type="hidden" name="min_source_count" value={minSourceCount ? String(minSourceCount) : ""} />
+              {hideFeatures ? <input type="hidden" name="hide_features" value="1" /> : null}
+
+              <div className="admin-stat-grid">
+                <div className="admin-stat-card">
+                  <div className="admin-stat-label">Saved shortlist</div>
+                  <div className="admin-stat-value">{draft?.selectedStoryIds.length ?? 0}</div>
+                </div>
+                <div className="admin-stat-card">
+                  <div className="admin-stat-label">Manual add URLs</div>
+                  <div className="admin-stat-value">{draft?.manualAddUrls.length ?? 0}</div>
+                </div>
+                <div className="admin-stat-card">
+                  <div className="admin-stat-label">Current menu ID</div>
+                  <div className="admin-stat-value admin-stat-value-small">{menuId.slice(0, 8)}</div>
+                </div>
+                <div className="admin-stat-card">
+                  <div className="admin-stat-label">Last saved</div>
+                  <div className="admin-stat-value admin-stat-value-small">
+                    {draft ? formatDateTime(draft.createdAt) : "Not saved yet"}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1.3fr) minmax(280px, 0.7fr)",
+                  gap: "16px",
+                  marginTop: "16px"
+                }}
+              >
+                <div className="story-list">
+                  {menu.stories.map((story) => {
+                    const savedRank =
+                      draft?.selected.find((item) => item.story_id === story.story_id)?.published_rank ??
+                      story.menu_rank;
+                    const isSelected = draft?.selectedStoryIds.includes(story.story_id) ?? false;
+
+                    return (
+                      <article className="story" key={`draft-${story.story_id}`}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "auto 1fr auto",
+                            gap: "12px",
+                            alignItems: "start"
+                          }}
+                        >
+                          <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "2px" }}>
+                            <input
+                              type="checkbox"
+                              name="selected_story_ids"
+                              value={story.story_id}
+                              defaultChecked={isSelected}
+                            />
+                            <span style={{ fontFamily: "var(--font-ui)", fontSize: "12px", color: "var(--ink-muted)" }}>
+                              Select
+                            </span>
+                          </label>
+                          <div>
+                            <div className="meta">
+                              #{story.menu_rank} · {formatLabel(story.story_type)} · {story.source_count} sources
+                            </div>
+                            <h3 style={{ marginTop: "8px" }}>{story.title}</h3>
+                            {story.summary ? <p>{story.summary}</p> : null}
+                          </div>
+                          <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)" }}>
+                            Order
+                            <input
+                              type="number"
+                              name={`story_rank:${story.story_id}`}
+                              min={1}
+                              defaultValue={savedRank}
+                              style={{ width: "72px", ...fieldStyle }}
+                            />
+                          </label>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <div className="story-list">
+                  <div className="story">
+                    <div className="meta">Current shortlist</div>
+                    {draft?.selected.length ? (
+                      <div className="preview-list" style={{ marginTop: "12px" }}>
+                        {draft.selected.map((item) => {
+                          const story = menu.stories.find((entry) => entry.story_id === item.story_id);
+                          return (
+                            <div className="preview-item" key={`saved-${item.story_id}`}>
+                              <span>#{item.published_rank}</span>
+                              <div style={{ fontFamily: "var(--font-body)", color: "var(--ink)" }}>
+                                {story?.title ?? `Story ${item.story_id.slice(0, 8)}`}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p style={{ marginTop: "8px" }}>Nothing saved yet.</p>
+                    )}
+                  </div>
+
+                  <div className="story">
+                    <div className="meta">Manual adds</div>
+                    <label style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
+                      <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                        Paste one URL per line for stories the menu missed.
+                      </span>
+                      <textarea
+                        name="manual_add_urls"
+                        rows={8}
+                        defaultValue={(draft?.manualAddUrls ?? []).join("\n")}
+                        style={{
+                          ...fieldStyle,
+                          minHeight: "180px",
+                          resize: "vertical",
+                          fontFamily: "var(--font-ui)"
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="admin-action-row">
+                    <button type="submit" className="admin-action">
+                      Save shortlist
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+
+            <div className="admin-action-row" style={{ marginTop: "12px" }}>
+              <form action={clearNewsletterDraft}>
+                <input type="hidden" name="menu_id" value={menuId} />
+                <input type="hidden" name="days" value={String(daysBack)} />
+                <input type="hidden" name="limit" value={String(limit)} />
+                <input type="hidden" name="audience" value={audience ?? ""} />
+                <input type="hidden" name="lane" value={lane ?? ""} />
+                <input type="hidden" name="min_source_count" value={minSourceCount ? String(minSourceCount) : ""} />
+                {hideFeatures ? <input type="hidden" name="hide_features" value="1" /> : null}
+                <button type="submit" className="admin-action admin-action-secondary">
+                  Clear draft
+                </button>
+              </form>
+            </div>
+
+            <div className="admin-inline-note">
+              Saved selections are stored as the latest draft for this menu in `admin_events`.
+              We can promote this to a dedicated table later if the workflow proves sticky.
+            </div>
+          </section>
+
           <section className="card">
             <h2>Menu snapshot</h2>
             <p>Generated {formatDateTime(menu.generated_at)} using ranking profile {menu.ranking_version}.</p>

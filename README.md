@@ -118,8 +118,12 @@ Techmeme for US K-12 education news.
   - pull the weekly menu server-side inside admin
   - review broad or filtered pulls (`lane`, `audience`, `min_source_count`, hide features)
   - open primary/supporting links without depending on Cowork outbound network access
+- Draft workflow:
+  - save a shortlist against the current `menu_id`
+  - store manual-add URLs the editor found herself
+  - persist the latest draft in `admin_events` (`newsletter_menu_feedback_draft`) for later tuning/export work
 - Current scope:
-  - reliable in-app menu review and filtering
+  - reliable in-app menu review, shortlist drafting, and manual-add capture
   - drafting and Beehiiv export still happen outside the admin panel for now
 
 ## Automation (Recommended)
