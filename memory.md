@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-03-11
+Last updated: 2026-03-13
 
 ---
 
@@ -190,3 +190,4 @@ Last updated: 2026-03-11
 - 2026-03-11: Fixed `audience=edtech` false positives caused by substring matching (`ai` inside words like `statewide`/`Mamdani`), removed audience-page fallback to the unfiltered homepage set, and added `qa:audience` regression coverage.
 - 2026-03-13: Added `/admin/newsletter`, an editor-facing weekly menu page that calls newsletter ranking server-side behind admin auth and exposes the most useful filters without requiring Cowork or direct API access.
 - 2026-03-13: Extended `/admin/newsletter` with persisted shortlist drafts and manual-add capture in `admin_events`, keeping storage lightweight while the editorial workflow settles.
+- 2026-03-13: Added Pulse-style blurb generation to `/admin/newsletter`; the pinned draft now stores selected-story context, manual URLs, and generated headline + 3-sentence summaries in `admin_events`, with inline per-item failures instead of silent drops.

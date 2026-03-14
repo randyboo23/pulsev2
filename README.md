@@ -122,10 +122,11 @@ Techmeme for US K-12 education news.
   - save a pinned shortlist against a persistent `draft_id`
   - change filters and menu pulls without losing the existing shortlist
   - store manual-add URLs the editor found herself
+  - generate Pulse-style newsletter blurbs for the current shortlist + manual URLs
   - persist the latest draft in `admin_events` (`newsletter_menu_feedback_draft`) for later tuning/export work
 - Current scope:
-  - reliable in-app menu review, shortlist drafting, and manual-add capture
-  - drafting and Beehiiv export still happen outside the admin panel for now
+  - reliable in-app menu review, shortlist drafting, manual-add capture, and blurb generation
+  - Beehiiv export still happens outside the admin panel for now
 
 ## Automation (Recommended)
 - Use a scheduler to hit `/api/ingest` every 30 minutes.

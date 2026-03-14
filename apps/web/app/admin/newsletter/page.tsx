@@ -1,16 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
-import type { Audience, NewsletterLane, NewsletterRankingReason } from "@pulse/core";
+import type {
+  Audience,
+  NewsletterDraftDetail,
+  NewsletterGeneratedBlurb,
+  NewsletterLane,
+  NewsletterRankingReason
+} from "@pulse/core";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
 import AdminSubmitButton from "@/src/components/AdminSubmitButton";
+import { buildNewsletterDraftBlurbKey } from "@/src/lib/newsletter-blurbs";
 import {
   getNewsletterMenuStories,
   NEWSLETTER_MENU_DEFAULT_DAYS,
   NEWSLETTER_MENU_DEFAULT_LIMIT,
   recordNewsletterMenuSnapshot
 } from "@/src/lib/stories";
-import { clearNewsletterDraft, saveNewsletterDraft } from "./actions";
+import { clearNewsletterDraft, generateNewsletterBlurbs, saveNewsletterDraft } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -27,15 +34,7 @@ type AdminNewsletterSearchParams = {
 
 type NewsletterDraftRow = {
   created_at: string;
-  detail:
-    | {
-        draft_id?: string;
-        menu_id?: string;
-        selected_story_ids?: string[];
-        selected?: Array<{ story_id?: string; published_rank?: number; title?: string | null }>;
-        manual_add_urls?: string[];
-      }
-    | null;
+  detail: NewsletterDraftDetail | null;
 };
 
 type NewsletterSnapshotExistsRow = {
@@ -70,6 +69,23 @@ function parseLane(value: string | null): NewsletterLane | null {
 
 function parseBooleanFlag(value: string | null) {
   return value === "1" || value === "true" || value === "on";
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized : null;
+}
+
+function normalizeOptionalUrl(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function parseMenuId(value: string | null) {
@@ -166,7 +182,10 @@ async function loadNewsletterDraft(draftId: string | null) {
     .map((item) => ({
       story_id: String(item?.story_id ?? "").trim(),
       published_rank: Number(item?.published_rank ?? 0),
-      title: String(item?.title ?? "").trim() || null
+      title: normalizeOptionalText(item?.title ?? null),
+      summary: normalizeOptionalText(item?.summary ?? null),
+      source_url: normalizeOptionalUrl(item?.source_url ?? null),
+      source_name: normalizeOptionalText(item?.source_name ?? null)
     }))
     .filter(
       (item) =>
@@ -193,11 +212,53 @@ async function loadNewsletterDraft(draftId: string | null) {
         .filter(Boolean)
     : [];
 
+  const manualAddOrder = new Map(manualAddUrls.map((url, index) => [url, index]));
+  const activeKeys = new Set<string>([
+    ...selected.map((item) => buildNewsletterDraftBlurbKey("story", item.story_id)),
+    ...manualAddUrls.map((url) => buildNewsletterDraftBlurbKey("manual", url))
+  ]);
+  const generatedRows = Array.isArray(row.detail.generated_blurbs) ? row.detail.generated_blurbs : [];
+  const generatedBlurbs = generatedRows
+    .map((item) => {
+      const kind = item?.kind === "manual" ? "manual" : "story";
+      const storyId =
+        kind === "story" && /^[0-9a-f-]{36}$/i.test(String(item?.story_id ?? ""))
+          ? String(item?.story_id ?? "").trim()
+          : null;
+      const url = normalizeOptionalUrl(item?.url ?? null) ?? "";
+      const key =
+        normalizeOptionalText(item?.key ?? null) ??
+        buildNewsletterDraftBlurbKey(kind, kind === "story" ? (storyId ?? "") : url);
+      return {
+        key,
+        kind,
+        story_id: storyId,
+        published_rank: Number(item?.published_rank ?? 0) || null,
+        url,
+        title: normalizeOptionalText(item?.title ?? null),
+        source_name: normalizeOptionalText(item?.source_name ?? null),
+        headline: normalizeOptionalText(item?.headline ?? null),
+        summary: normalizeOptionalText(item?.summary ?? null),
+        error: normalizeOptionalText(item?.error ?? null),
+        generated_at: normalizeOptionalText(item?.generated_at ?? null) ?? row.created_at
+      } satisfies NewsletterGeneratedBlurb;
+    })
+    .filter((item) => activeKeys.has(item.key))
+    .sort((left, right) => {
+      if (left.kind === "story" && right.kind === "story") {
+        return (left.published_rank ?? 999) - (right.published_rank ?? 999);
+      }
+      if (left.kind === "story") return -1;
+      if (right.kind === "story") return 1;
+      return (manualAddOrder.get(left.url) ?? 999) - (manualAddOrder.get(right.url) ?? 999);
+    });
+
   return {
     createdAt: row.created_at,
     selected,
     selectedStoryIds,
-    manualAddUrls
+    manualAddUrls,
+    generatedBlurbs
   };
 }
 
@@ -476,7 +537,7 @@ export default async function AdminNewsletterPage({
 
         <div className="admin-inline-note">
           The shortlist stays pinned to this draft while you change filters to surface more stories.
-          Drafting and Beehiiv export still come next.
+          Once the picks feel right, generate Pulse-style blurbs here before moving to export.
         </div>
       </section>
 
@@ -490,8 +551,8 @@ export default async function AdminNewsletterPage({
           <section className="card">
             <h2>Shortlist draft</h2>
             <p>
-              Save selected stories and any manual URLs against this menu. This is the first half
-              of the feedback loop we can tune from later.
+              Save the picks that belong in this week&apos;s issue, then generate newsletter blurbs in
+              the Pulse voice for the shortlist and any manual URLs.
             </p>
 
             <form action={saveNewsletterDraft} style={{ marginTop: "16px" }}>
@@ -512,6 +573,10 @@ export default async function AdminNewsletterPage({
                 <div className="admin-stat-card">
                   <div className="admin-stat-label">Manual add URLs</div>
                   <div className="admin-stat-value">{draft?.manualAddUrls.length ?? 0}</div>
+                </div>
+                <div className="admin-stat-card">
+                  <div className="admin-stat-label">Generated blurbs</div>
+                  <div className="admin-stat-value">{draft?.generatedBlurbs.length ?? 0}</div>
                 </div>
                 <div className="admin-stat-card">
                   <div className="admin-stat-label">Current menu ID</div>
@@ -541,7 +606,12 @@ export default async function AdminNewsletterPage({
                   {draft?.selected
                     .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
                     .map((item) => (
-                      <input key={`hidden-selected-${item.story_id}`} type="hidden" name="selected_story_ids" value={item.story_id} />
+                      <input
+                        key={`hidden-selected-${item.story_id}`}
+                        type="hidden"
+                        name="selected_story_ids"
+                        value={item.story_id}
+                      />
                     ))}
                   {draft?.selected
                     .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
@@ -563,11 +633,43 @@ export default async function AdminNewsletterPage({
                         value={item.title ?? ""}
                       />
                     ))}
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input
+                        key={`hidden-summary-${item.story_id}`}
+                        type="hidden"
+                        name={`story_summary:${item.story_id}`}
+                        value={item.summary ?? ""}
+                      />
+                    ))}
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input
+                        key={`hidden-source-url-${item.story_id}`}
+                        type="hidden"
+                        name={`story_source_url:${item.story_id}`}
+                        value={item.source_url ?? ""}
+                      />
+                    ))}
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input
+                        key={`hidden-source-name-${item.story_id}`}
+                        type="hidden"
+                        name={`story_source_name:${item.story_id}`}
+                        value={item.source_name ?? ""}
+                      />
+                    ))}
                   {menu.stories.map((story) => {
-                    const savedRank =
-                      draft?.selected.find((item) => item.story_id === story.story_id)?.published_rank ??
-                      story.menu_rank;
+                    const savedSelection = draft?.selected.find((item) => item.story_id === story.story_id);
+                    const savedRank = savedSelection?.published_rank ?? story.menu_rank;
                     const isSelected = draft?.selectedStoryIds.includes(story.story_id) ?? false;
+                    const primarySourceName =
+                      story.primary_article?.source_name ?? story.primary_article?.domain ?? null;
+                    const primarySourceUrl = story.primary_article?.url ?? null;
 
                     return (
                       <article className="story" key={`draft-${story.story_id}`}>
@@ -597,6 +699,21 @@ export default async function AdminNewsletterPage({
                             </div>
                             <h3 style={{ marginTop: "8px" }}>{story.title}</h3>
                             <input type="hidden" name={`story_title:${story.story_id}`} value={story.title} />
+                            <input
+                              type="hidden"
+                              name={`story_summary:${story.story_id}`}
+                              value={story.summary ?? savedSelection?.summary ?? ""}
+                            />
+                            <input
+                              type="hidden"
+                              name={`story_source_url:${story.story_id}`}
+                              value={primarySourceUrl ?? savedSelection?.source_url ?? ""}
+                            />
+                            <input
+                              type="hidden"
+                              name={`story_source_name:${story.story_id}`}
+                              value={primarySourceName ?? savedSelection?.source_name ?? ""}
+                            />
                             {story.summary ? <p>{story.summary}</p> : <p>No summary available yet.</p>}
 
                             <div className="chips" style={{ marginTop: "10px" }}>
@@ -705,7 +822,8 @@ export default async function AdminNewsletterPage({
                     ) : null}
                     <label style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                        Paste one URL per line for stories the menu missed.
+                        Paste one URL per line for stories the menu missed. The blurb generator will
+                        try DB context first, then a lightweight scrape.
                       </span>
                       <textarea
                         name="manual_add_urls"
@@ -724,6 +842,14 @@ export default async function AdminNewsletterPage({
                   <div className="admin-action-row">
                     <AdminSubmitButton className="admin-action" pendingLabel="Saving..." successLabel="Saved">
                       Save shortlist
+                    </AdminSubmitButton>
+                    <AdminSubmitButton
+                      formAction={generateNewsletterBlurbs}
+                      className="admin-action admin-action-secondary"
+                      pendingLabel="Generating..."
+                      successLabel="Blurbs ready"
+                    >
+                      Generate blurbs
                     </AdminSubmitButton>
                   </div>
                 </div>
@@ -753,7 +879,8 @@ export default async function AdminNewsletterPage({
             <div className="admin-inline-note">
               Saved selections are stored as the latest draft for this session in `admin_events`.
               The current menu snapshot and the pinned draft are now separate so you can keep building
-              the shortlist while changing filters.
+              the shortlist while changing filters. Blurbs are generated only for the current pinned
+              shortlist and manual URLs, not the whole menu.
             </div>
 
             <div className="admin-badge-row" style={{ marginTop: "12px" }}>
@@ -766,6 +893,72 @@ export default async function AdminNewsletterPage({
                 Multi-source: {menu.pool_stats.multi_source_returned}
               </span>
             </div>
+          </section>
+
+          <section className="card">
+            <h2>Generated blurbs</h2>
+            <p>
+              Pulse-style headline plus a three-sentence summary for each shortlisted story or
+              manual add. If a URL cannot be scraped cleanly, the error stays visible here instead
+              of failing silently.
+            </p>
+
+            {draft?.generatedBlurbs.length ? (
+              <div className="story-list" style={{ marginTop: "16px" }}>
+                {draft.generatedBlurbs.map((blurb) => (
+                  <article className="story" key={blurb.key}>
+                    <div className="meta">
+                      {blurb.kind === "story"
+                        ? `Shortlist #${blurb.published_rank ?? "?"}`
+                        : "Manual add"}{" "}
+                      · {blurb.source_name ?? "Unknown source"} · {formatDateTime(blurb.generated_at)}
+                    </div>
+
+                    <h3 style={{ marginTop: "10px" }}>
+                      {blurb.headline ?? blurb.title ?? "Blurb unavailable"}
+                    </h3>
+
+                    {blurb.summary ? (
+                      <p style={{ marginTop: "10px" }}>{blurb.summary}</p>
+                    ) : (
+                      <p style={{ marginTop: "10px", color: "var(--accent)" }}>
+                        {blurb.error ?? "No blurb generated yet."}
+                      </p>
+                    )}
+
+                    <div className="preview-list" style={{ marginTop: "12px" }}>
+                      <div className="preview-item">
+                        <span>{blurb.kind === "story" ? "Source article" : "Manual URL"}</span>
+                        {blurb.url ? (
+                          <a
+                            href={blurb.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
+                          >
+                            {blurb.title ?? blurb.url}
+                          </a>
+                        ) : (
+                          <span style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}>
+                            {blurb.title ?? "Saved story context"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="story-list" style={{ marginTop: "16px" }}>
+                <div className="story">
+                  <div className="meta">No blurbs yet</div>
+                  <p style={{ marginTop: "8px" }}>
+                    Save a shortlist, then use <strong>Generate blurbs</strong> to draft the copy in
+                    Pulse&apos;s newsletter style.
+                  </p>
+                </div>
+              </div>
+            )}
           </section>
         </>
       ) : null}

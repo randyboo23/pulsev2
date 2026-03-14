@@ -125,3 +125,45 @@ export type NewsletterMenuResponse = {
   pool_stats: NewsletterMenuPoolStats;
   stories: NewsletterMenuStory[];
 };
+
+export type NewsletterDraftSelection = {
+  story_id: string;
+  published_rank: number;
+  title: string | null;
+  summary: string | null;
+  source_url: string | null;
+  source_name: string | null;
+};
+
+export type NewsletterGeneratedBlurb = {
+  key: string;
+  kind: "story" | "manual";
+  story_id: string | null;
+  published_rank: number | null;
+  url: string;
+  title: string | null;
+  source_name: string | null;
+  headline: string | null;
+  summary: string | null;
+  error: string | null;
+  generated_at: string;
+};
+
+export type NewsletterDraftQuery = Pick<
+  NewsletterMenuQuery,
+  "audience" | "lane" | "min_source_count"
+> & {
+  hide_features: boolean;
+};
+
+export type NewsletterDraftDetail = {
+  source?: "admin_newsletter";
+  draft_id?: string;
+  menu_id?: string;
+  source_menu_id?: string;
+  query?: NewsletterDraftQuery;
+  selected_story_ids?: string[];
+  selected?: NewsletterDraftSelection[];
+  manual_add_urls?: string[];
+  generated_blurbs?: NewsletterGeneratedBlurb[];
+};

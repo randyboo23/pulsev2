@@ -102,7 +102,8 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
 - Admin newsletter review:
   - Editor loads `/admin/newsletter` after standard admin login.
   - Page calls `getNewsletterMenuStories()` server-side, bypassing Cowork/custom-domain network issues and avoiding any browser-visible newsletter secret.
-  - Editor can save a pinned shortlist + manual URLs against a persistent `draft_id` while moving across filtered menu pulls; latest draft is stored in `admin_events` as `newsletter_menu_feedback_draft`.
+  - Editor can save a pinned shortlist + manual URLs against a persistent `draft_id` while moving across filtered menu pulls.
+  - Editor can generate Pulse-style newsletter blurbs for the current shortlist and manual URLs; latest draft state and generated blurbs are stored in `admin_events` as `newsletter_menu_feedback_draft`.
 
 ## Pages
 
@@ -159,6 +160,7 @@ apps/web/
     ranking.ts               # Deterministic scoring logic
     stories.ts               # Story queries + ranking logic + homepage-rank persistence
     grouping.ts              # Story clustering (currently lexical)
+    newsletter-blurbs.ts     # Admin newsletter blurb generation helpers
     feeds.ts                 # Feed registry + discovery queries
     sources.ts               # Source tiers (moved to packages/core)
     admin.ts                 # Admin logic
@@ -200,6 +202,7 @@ scripts/
 - Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.
 - `/admin/newsletter` reuses that same lib call directly on the server, exposing only editor-friendly controls (`days`, `limit`, `lane`, `audience`, `min_source_count`, hide features) and rendering the ranked stories in-app.
 - `/admin/newsletter` also persists editor shortlist drafts and manual-add URLs in `admin_events`, keyed by `draft_id` and annotated with the current `menu_id`, so feedback capture can start without a new table.
+- `/admin/newsletter` now also stores generated newsletter blurbs on that same draft record, using saved story context for shortlisted items and lightweight DB/free-scrape context for manual URLs.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).
@@ -210,6 +213,7 @@ scripts/
 - Newsletter menu requires `NEWSLETTER_SECRET`; generated menus are logged in `admin_events` under `newsletter_menu_generated` for later feedback attachment.
 - Admin newsletter review does not require `NEWSLETTER_SECRET` because it is gated by the existing admin cookie and reads the menu server-side.
 - Newsletter draft persistence currently lives in `admin_events` for speed; if the workflow hardens, promote it to a dedicated table.
+- Newsletter blurb generation uses the existing Anthropic env (`ANTHROPIC_API_KEY`) and fails inline per item when a selected story or manual URL does not have enough usable source text.
 - SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.
