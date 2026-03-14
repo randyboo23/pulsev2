@@ -191,3 +191,4 @@ Last updated: 2026-03-13
 - 2026-03-13: Added `/admin/newsletter`, an editor-facing weekly menu page that calls newsletter ranking server-side behind admin auth and exposes the most useful filters without requiring Cowork or direct API access.
 - 2026-03-13: Extended `/admin/newsletter` with persisted shortlist drafts and manual-add capture in `admin_events`, keeping storage lightweight while the editorial workflow settles.
 - 2026-03-13: Added Pulse-style blurb generation to `/admin/newsletter`; the pinned draft now stores selected-story context, manual URLs, and generated headline + 3-sentence summaries in `admin_events`, with inline per-item failures instead of silent drops.
+- 2026-03-13: Added an in-page jump link from the shortlist action area to the generated blurbs section so editors do not have to scroll through the full menu after generation.

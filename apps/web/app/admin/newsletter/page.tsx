@@ -852,6 +852,12 @@ export default async function AdminNewsletterPage({
                       Generate blurbs
                     </AdminSubmitButton>
                   </div>
+
+                  <div className="admin-action-row" style={{ marginTop: "10px" }}>
+                    <a className="admin-action admin-action-secondary" href="#generated-blurbs">
+                      Jump to generated blurbs
+                    </a>
+                  </div>
                 </div>
               </div>
             </form>
@@ -895,7 +901,7 @@ export default async function AdminNewsletterPage({
             </div>
           </section>
 
-          <section className="card">
+          <section className="card" id="generated-blurbs">
             <h2>Generated blurbs</h2>
             <p>
               Pulse-style headline plus a three-sentence summary for each shortlisted story or
