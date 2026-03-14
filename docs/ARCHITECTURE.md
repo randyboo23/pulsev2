@@ -102,7 +102,7 @@ Newsletter Menu (api/newsletter/menu/route.ts) -- getNewsletterMenuStories() ran
 - Admin newsletter review:
   - Editor loads `/admin/newsletter` after standard admin login.
   - Page calls `getNewsletterMenuStories()` server-side, bypassing Cowork/custom-domain network issues and avoiding any browser-visible newsletter secret.
-  - Editor can save a shortlist + manual URLs against the current `menu_id`; latest draft is stored in `admin_events` as `newsletter_menu_feedback_draft`.
+  - Editor can save a pinned shortlist + manual URLs against a persistent `draft_id` while moving across filtered menu pulls; latest draft is stored in `admin_events` as `newsletter_menu_feedback_draft`.
 
 ## Pages
 
@@ -199,7 +199,7 @@ scripts/
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.
 - `/admin/newsletter` reuses that same lib call directly on the server, exposing only editor-friendly controls (`days`, `limit`, `lane`, `audience`, `min_source_count`, hide features) and rendering the ranked stories in-app.
-- `/admin/newsletter` also persists editor shortlist drafts and manual-add URLs in `admin_events`, keyed by `menu_id`, so feedback capture can start without a new table.
+- `/admin/newsletter` also persists editor shortlist drafts and manual-add URLs in `admin_events`, keyed by `draft_id` and annotated with the current `menu_id`, so feedback capture can start without a new table.
 - Latest Wire uses `getRecentArticles()`: stricter link/title hygiene plus AP-wire topical filtering.
 - Story detail page reads `stories` + linked `articles`. Single-source stories show source link without repeating summary.
 - Preview contract: `preview_type` (full/excerpt/headline_only/synthetic), `preview_confidence` (0..1).

@@ -119,7 +119,8 @@ Techmeme for US K-12 education news.
   - review broad or filtered pulls (`lane`, `audience`, `min_source_count`, hide features)
   - open primary/supporting links without depending on Cowork outbound network access
 - Draft workflow:
-  - save a shortlist against the current `menu_id`
+  - save a pinned shortlist against a persistent `draft_id`
+  - change filters and menu pulls without losing the existing shortlist
   - store manual-add URLs the editor found herself
   - persist the latest draft in `admin_events` (`newsletter_menu_feedback_draft`) for later tuning/export work
 - Current scope:

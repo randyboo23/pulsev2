@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { Audience, NewsletterLane, NewsletterRankingReason } from "@pulse/core";
 import { isAdmin } from "@/src/lib/admin";
 import { pool } from "@/src/lib/db";
+import AdminSubmitButton from "@/src/components/AdminSubmitButton";
 import {
   getNewsletterMenuStories,
   NEWSLETTER_MENU_DEFAULT_DAYS,
@@ -14,6 +15,7 @@ import { clearNewsletterDraft, saveNewsletterDraft } from "./actions";
 export const dynamic = "force-dynamic";
 
 type AdminNewsletterSearchParams = {
+  draft_id?: string | string[];
   menu_id?: string | string[];
   days?: string | string[];
   limit?: string | string[];
@@ -27,9 +29,10 @@ type NewsletterDraftRow = {
   created_at: string;
   detail:
     | {
+        draft_id?: string;
         menu_id?: string;
         selected_story_ids?: string[];
-        selected?: Array<{ story_id?: string; published_rank?: number }>;
+        selected?: Array<{ story_id?: string; published_rank?: number; title?: string | null }>;
         manual_add_urls?: string[];
       }
     | null;
@@ -121,6 +124,7 @@ function formatLabel(value: string) {
 }
 
 function buildNewsletterHref(params: {
+  draftId?: string | null;
   menuId?: string | null;
   days: number;
   limit: number;
@@ -130,6 +134,7 @@ function buildNewsletterHref(params: {
   hideFeatures: boolean;
 }) {
   const search = new URLSearchParams();
+  if (params.draftId) search.set("draft_id", params.draftId);
   if (params.menuId) search.set("menu_id", params.menuId);
   search.set("days", String(params.days));
   search.set("limit", String(params.limit));
@@ -140,17 +145,17 @@ function buildNewsletterHref(params: {
   return `/admin/newsletter?${search.toString()}`;
 }
 
-async function loadNewsletterDraft(menuId: string | null) {
-  if (!menuId) return null;
+async function loadNewsletterDraft(draftId: string | null) {
+  if (!draftId) return null;
 
   const result = await pool.query<NewsletterDraftRow>(
     `select created_at, detail
      from admin_events
      where event_type = 'newsletter_menu_feedback_draft'
-       and detail->>'menu_id' = $1
+       and detail->>'draft_id' = $1
      order by created_at desc
      limit 1`,
-    [menuId]
+    [draftId]
   );
 
   const row = result.rows[0];
@@ -160,7 +165,8 @@ async function loadNewsletterDraft(menuId: string | null) {
   const selected = selectedRows
     .map((item) => ({
       story_id: String(item?.story_id ?? "").trim(),
-      published_rank: Number(item?.published_rank ?? 0)
+      published_rank: Number(item?.published_rank ?? 0),
+      title: String(item?.title ?? "").trim() || null
     }))
     .filter(
       (item) =>
@@ -222,6 +228,7 @@ export default async function AdminNewsletterPage({
     redirect("/admin/login");
   }
 
+  const draftId = parseMenuId(readFirst(searchParams?.draft_id)) ?? randomUUID();
   const menuId = parseMenuId(readFirst(searchParams?.menu_id)) ?? randomUUID();
   const daysBack = parseBoundedInt(
     readFirst(searchParams?.days),
@@ -239,7 +246,7 @@ export default async function AdminNewsletterPage({
   const lane = parseLane(readFirst(searchParams?.lane));
   const minSourceCount = parseOptionalBoundedInt(readFirst(searchParams?.min_source_count), 1, 10);
   const hideFeatures = parseBooleanFlag(readFirst(searchParams?.hide_features));
-  const draft = await loadNewsletterDraft(menuId);
+  const draft = await loadNewsletterDraft(draftId);
 
   let menu: Awaited<ReturnType<typeof getNewsletterMenuStories>> | null = null;
   let loadError: string | null = null;
@@ -277,6 +284,7 @@ export default async function AdminNewsletterPage({
     {
       label: "All lanes",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -290,6 +298,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Policy",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -303,6 +312,7 @@ export default async function AdminNewsletterPage({
     {
       label: "EdTech",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -316,6 +326,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Classroom",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -329,6 +340,7 @@ export default async function AdminNewsletterPage({
     {
       label: "Leadership",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -342,6 +354,7 @@ export default async function AdminNewsletterPage({
     {
       label: "2+ Sources",
       href: buildNewsletterHref({
+        draftId,
         menuId: null,
         days: daysBack,
         limit,
@@ -388,6 +401,7 @@ export default async function AdminNewsletterPage({
             alignItems: "end"
           }}
         >
+          <input type="hidden" name="draft_id" value={draftId} />
           <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)" }}>
             Days
             <input type="number" name="days" min={3} max={14} defaultValue={daysBack} style={fieldStyle} />
@@ -461,8 +475,8 @@ export default async function AdminNewsletterPage({
         </div>
 
         <div className="admin-inline-note">
-          Use this page to review and shortlist stories. Drafting and Beehiiv export can stay in
-          Cowork for now, but the menu pull itself is stable here.
+          The shortlist stays pinned to this draft while you change filters to surface more stories.
+          Drafting and Beehiiv export still come next.
         </div>
       </section>
 
@@ -481,6 +495,7 @@ export default async function AdminNewsletterPage({
             </p>
 
             <form action={saveNewsletterDraft} style={{ marginTop: "16px" }}>
+              <input type="hidden" name="draft_id" value={draftId} />
               <input type="hidden" name="menu_id" value={menuId} />
               <input type="hidden" name="days" value={String(daysBack)} />
               <input type="hidden" name="limit" value={String(limit)} />
@@ -503,6 +518,10 @@ export default async function AdminNewsletterPage({
                   <div className="admin-stat-value admin-stat-value-small">{menuId.slice(0, 8)}</div>
                 </div>
                 <div className="admin-stat-card">
+                  <div className="admin-stat-label">Pinned draft ID</div>
+                  <div className="admin-stat-value admin-stat-value-small">{draftId.slice(0, 8)}</div>
+                </div>
+                <div className="admin-stat-card">
                   <div className="admin-stat-label">Last saved</div>
                   <div className="admin-stat-value admin-stat-value-small">
                     {draft ? formatDateTime(draft.createdAt) : "Not saved yet"}
@@ -513,12 +532,37 @@ export default async function AdminNewsletterPage({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(0, 1.3fr) minmax(280px, 0.7fr)",
+                  gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.6fr)",
                   gap: "16px",
                   marginTop: "16px"
                 }}
               >
                 <div className="story-list">
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input key={`hidden-selected-${item.story_id}`} type="hidden" name="selected_story_ids" value={item.story_id} />
+                    ))}
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input
+                        key={`hidden-rank-${item.story_id}`}
+                        type="hidden"
+                        name={`story_rank:${item.story_id}`}
+                        value={String(item.published_rank)}
+                      />
+                    ))}
+                  {draft?.selected
+                    .filter((item) => !menu.stories.some((story) => story.story_id === item.story_id))
+                    .map((item) => (
+                      <input
+                        key={`hidden-title-${item.story_id}`}
+                        type="hidden"
+                        name={`story_title:${item.story_id}`}
+                        value={item.title ?? ""}
+                      />
+                    ))}
                   {menu.stories.map((story) => {
                     const savedRank =
                       draft?.selected.find((item) => item.story_id === story.story_id)?.published_rank ??
@@ -548,10 +592,60 @@ export default async function AdminNewsletterPage({
                           </label>
                           <div>
                             <div className="meta">
-                              #{story.menu_rank} · {formatLabel(story.story_type)} · {story.source_count} sources
+                              #{story.menu_rank} · {formatLabel(story.story_type)} · {story.source_count} sources ·{" "}
+                              {story.source_family_count} source families
                             </div>
                             <h3 style={{ marginTop: "8px" }}>{story.title}</h3>
-                            {story.summary ? <p>{story.summary}</p> : null}
+                            <input type="hidden" name={`story_title:${story.story_id}`} value={story.title} />
+                            {story.summary ? <p>{story.summary}</p> : <p>No summary available yet.</p>}
+
+                            <div className="chips" style={{ marginTop: "10px" }}>
+                              {story.why_ranked.map((reason) => (
+                                <span className="chip" key={`${story.story_id}-${reason}`}>
+                                  {formatReasonLabel(reason)}
+                                </span>
+                              ))}
+                              {story.matched_lanes.map((matchedLane) => (
+                                <span className="chip" key={`${story.story_id}-${matchedLane}-lane`}>
+                                  {formatLabel(matchedLane)}
+                                </span>
+                              ))}
+                            </div>
+
+                            <div className="preview-list" style={{ marginTop: "12px" }}>
+                              {story.primary_article ? (
+                                <div className="preview-item">
+                                  <span>
+                                    Primary · {story.primary_article.source_name ?? story.primary_article.domain ?? "Unknown source"} ·{" "}
+                                    {formatDateTime(story.primary_article.published_at)}
+                                  </span>
+                                  <a
+                                    href={story.primary_article.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
+                                  >
+                                    {story.primary_article.title ?? story.primary_article.url}
+                                  </a>
+                                </div>
+                              ) : null}
+                              {story.supporting_articles.map((article) => (
+                                <div className="preview-item" key={article.url}>
+                                  <span>
+                                    Supporting · {article.source_name ?? article.domain ?? "Unknown source"} ·{" "}
+                                    {formatDateTime(article.published_at)}
+                                  </span>
+                                  <a
+                                    href={article.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
+                                  >
+                                    {article.title ?? article.url}
+                                  </a>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                           <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--muted)" }}>
                             Order
@@ -575,12 +669,11 @@ export default async function AdminNewsletterPage({
                     {draft?.selected.length ? (
                       <div className="preview-list" style={{ marginTop: "12px" }}>
                         {draft.selected.map((item) => {
-                          const story = menu.stories.find((entry) => entry.story_id === item.story_id);
                           return (
                             <div className="preview-item" key={`saved-${item.story_id}`}>
                               <span>#{item.published_rank}</span>
                               <div style={{ fontFamily: "var(--font-body)", color: "var(--ink)" }}>
-                                {story?.title ?? `Story ${item.story_id.slice(0, 8)}`}
+                                {item.title ?? `Story ${item.story_id.slice(0, 8)}`}
                               </div>
                             </div>
                           );
@@ -593,6 +686,23 @@ export default async function AdminNewsletterPage({
 
                   <div className="story">
                     <div className="meta">Manual adds</div>
+                    {(draft?.manualAddUrls.length ?? 0) > 0 ? (
+                      <div className="preview-list" style={{ marginTop: "12px", marginBottom: "12px" }}>
+                        {(draft?.manualAddUrls ?? []).map((url) => (
+                          <div className="preview-item" key={`manual-${url}`}>
+                            <span>Saved manual URL</span>
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
+                            >
+                              {url}
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <label style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
                         Paste one URL per line for stories the menu missed.
@@ -612,9 +722,9 @@ export default async function AdminNewsletterPage({
                   </div>
 
                   <div className="admin-action-row">
-                    <button type="submit" className="admin-action">
+                    <AdminSubmitButton className="admin-action" pendingLabel="Saving..." successLabel="Saved">
                       Save shortlist
-                    </button>
+                    </AdminSubmitButton>
                   </div>
                 </div>
               </div>
@@ -622,6 +732,7 @@ export default async function AdminNewsletterPage({
 
             <div className="admin-action-row" style={{ marginTop: "12px" }}>
               <form action={clearNewsletterDraft}>
+                <input type="hidden" name="draft_id" value={draftId} />
                 <input type="hidden" name="menu_id" value={menuId} />
                 <input type="hidden" name="days" value={String(daysBack)} />
                 <input type="hidden" name="limit" value={String(limit)} />
@@ -629,148 +740,31 @@ export default async function AdminNewsletterPage({
                 <input type="hidden" name="lane" value={lane ?? ""} />
                 <input type="hidden" name="min_source_count" value={minSourceCount ? String(minSourceCount) : ""} />
                 {hideFeatures ? <input type="hidden" name="hide_features" value="1" /> : null}
-                <button type="submit" className="admin-action admin-action-secondary">
+                <AdminSubmitButton
+                  className="admin-action admin-action-secondary"
+                  pendingLabel="Clearing..."
+                  successLabel="Cleared"
+                >
                   Clear draft
-                </button>
+                </AdminSubmitButton>
               </form>
             </div>
 
             <div className="admin-inline-note">
-              Saved selections are stored as the latest draft for this menu in `admin_events`.
-              We can promote this to a dedicated table later if the workflow proves sticky.
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Menu snapshot</h2>
-            <p>Generated {formatDateTime(menu.generated_at)} using ranking profile {menu.ranking_version}.</p>
-
-            <div className="admin-stat-grid" style={{ marginTop: "12px" }}>
-              <div className="admin-stat-card">
-                <div className="admin-stat-label">Returned stories</div>
-                <div className="admin-stat-value">{menu.pool_stats.returned_count}</div>
-              </div>
-              <div className="admin-stat-card">
-                <div className="admin-stat-label">Candidate pool</div>
-                <div className="admin-stat-value">{menu.pool_stats.candidate_count}</div>
-              </div>
-              <div className="admin-stat-card">
-                <div className="admin-stat-label">After filters</div>
-                <div className="admin-stat-value">{menu.pool_stats.filtered_count}</div>
-              </div>
-              <div className="admin-stat-card">
-                <div className="admin-stat-label">Multi-source in results</div>
-                <div className="admin-stat-value">{menu.pool_stats.multi_source_returned}</div>
-              </div>
+              Saved selections are stored as the latest draft for this session in `admin_events`.
+              The current menu snapshot and the pinned draft are now separate so you can keep building
+              the shortlist while changing filters.
             </div>
 
             <div className="admin-badge-row" style={{ marginTop: "12px" }}>
-              <span className="admin-badge">Days: {daysBack}</span>
-              <span className="admin-badge">Limit: {limit}</span>
-              <span className="admin-badge">Lane: {lane ? formatLabel(lane) : "All"}</span>
-              <span className="admin-badge">Audience: {audience ? formatLabel(audience) : "All"}</span>
+              <span className="admin-badge">Menu: {menuId.slice(0, 8)}</span>
+              <span className="admin-badge">Draft: {draftId.slice(0, 8)}</span>
+              <span className="admin-badge">Generated: {formatDateTime(menu.generated_at)}</span>
+              <span className="admin-badge">Candidates: {menu.pool_stats.candidate_count}</span>
+              <span className="admin-badge">Returned: {menu.pool_stats.returned_count}</span>
               <span className="admin-badge">
-                Min sources: {minSourceCount ? `${minSourceCount}+` : "Any"}
+                Multi-source: {menu.pool_stats.multi_source_returned}
               </span>
-              {hideFeatures ? <span className="admin-badge">Feature stories hidden</span> : null}
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Ranked stories</h2>
-            <p>Primary links open the article the editor is most likely to read first.</p>
-            <div className="story-list" style={{ marginTop: "16px" }}>
-              {menu.stories.length === 0 ? (
-                <div className="story">
-                  <h3>No stories matched this filter set.</h3>
-                  <p>Broaden the lane/source filters and try again.</p>
-                </div>
-              ) : (
-                menu.stories.map((story) => (
-                  <article className="story" key={story.story_id}>
-                    <div className="meta">
-                      #{story.menu_rank} · {formatLabel(story.story_type)} · {story.source_count} sources ·{" "}
-                      {story.source_family_count} source families · Updated {formatDateTime(story.latest_at)}
-                    </div>
-                    <h3 style={{ marginTop: "8px" }}>
-                      <a
-                        href={story.primary_article?.url ?? `/stories/${story.story_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "inherit" }}
-                      >
-                        {story.title}
-                      </a>
-                    </h3>
-                    {story.summary ? <p>{story.summary}</p> : <p>No summary available yet.</p>}
-
-                    <div className="chips">
-                      {story.why_ranked.map((reason) => (
-                        <span className="chip" key={`${story.story_id}-${reason}`}>
-                          {formatReasonLabel(reason)}
-                        </span>
-                      ))}
-                      {story.matched_lanes.map((matchedLane) => (
-                        <span className="chip" key={`${story.story_id}-${matchedLane}-lane`}>
-                          {formatLabel(matchedLane)}
-                        </span>
-                      ))}
-                      {story.homepage_rank ? (
-                        <span className="chip">Homepage #{story.homepage_rank}</span>
-                      ) : null}
-                    </div>
-
-                    <div className="admin-action-row" style={{ marginTop: "10px" }}>
-                      <a
-                        className="admin-link"
-                        href={story.primary_article?.url ?? `/stories/${story.story_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Open primary article
-                      </a>
-                      <a className="admin-link" href={`/stories/${story.story_id}`}>
-                        View story detail
-                      </a>
-                    </div>
-
-                    <div className="preview-list" style={{ marginTop: "12px" }}>
-                      {story.primary_article ? (
-                        <div className="preview-item">
-                          <span>
-                            Primary · {story.primary_article.source_name ?? story.primary_article.domain ?? "Unknown source"} ·{" "}
-                            {formatDateTime(story.primary_article.published_at)}
-                          </span>
-                          <a
-                            href={story.primary_article.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
-                          >
-                            {story.primary_article.title ?? story.primary_article.url}
-                          </a>
-                        </div>
-                      ) : null}
-                      {story.supporting_articles.map((article) => (
-                        <div className="preview-item" key={article.url}>
-                          <span>
-                            Supporting · {article.source_name ?? article.domain ?? "Unknown source"} ·{" "}
-                            {formatDateTime(article.published_at)}
-                          </span>
-                          <a
-                            href={article.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: "var(--ink)", fontFamily: "var(--font-body)" }}
-                          >
-                            {article.title ?? article.url}
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  </article>
-                ))
-              )}
             </div>
           </section>
         </>

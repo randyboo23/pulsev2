@@ -71,6 +71,7 @@ function normalizeManualUrlList(value: string) {
 }
 
 function buildNewsletterAdminHref(params: {
+  draftId: string | null;
   menuId: string | null;
   days: number | null;
   limit: number | null;
@@ -80,6 +81,7 @@ function buildNewsletterAdminHref(params: {
   hideFeatures: boolean;
 }) {
   const search = new URLSearchParams();
+  if (params.draftId) search.set("draft_id", params.draftId);
   if (params.menuId) search.set("menu_id", params.menuId);
   if (params.days) search.set("days", String(params.days));
   if (params.limit) search.set("limit", String(params.limit));
@@ -92,6 +94,7 @@ function buildNewsletterAdminHref(params: {
 }
 
 function readNewsletterQuery(formData: FormData) {
+  const draftId = parseUuid(formData.get("draft_id"));
   const menuId = parseUuid(formData.get("menu_id"));
   const days = parseOptionalPositiveInt(formData.get("days"));
   const limit = parseOptionalPositiveInt(formData.get("limit"));
@@ -99,14 +102,14 @@ function readNewsletterQuery(formData: FormData) {
   const lane = parseLane(formData.get("lane"));
   const minSourceCount = parseOptionalPositiveInt(formData.get("min_source_count"));
   const hideFeatures = parseBooleanFlag(formData.get("hide_features"));
-  return { menuId, days, limit, audience, lane, minSourceCount, hideFeatures };
+  return { draftId, menuId, days, limit, audience, lane, minSourceCount, hideFeatures };
 }
 
 export async function saveNewsletterDraft(formData: FormData) {
   requireAdmin();
 
   const query = readNewsletterQuery(formData);
-  if (!query.menuId) {
+  if (!query.draftId || !query.menuId) {
     redirect(buildNewsletterAdminHref(query));
   }
 
@@ -114,15 +117,18 @@ export async function saveNewsletterDraft(formData: FormData) {
   const selected = selectedStoryIds
     .map((storyId, index) => {
       const publishedRank = parseOptionalPositiveInt(formData.get(`story_rank:${storyId}`)) ?? index + 1;
+      const title = String(formData.get(`story_title:${storyId}`) ?? "").trim() || null;
       return {
         story_id: storyId,
-        published_rank: publishedRank
+        published_rank: publishedRank,
+        title
       };
     })
     .sort((left, right) => left.published_rank - right.published_rank || left.story_id.localeCompare(right.story_id))
     .map((item, index) => ({
       story_id: item.story_id,
-      published_rank: index + 1
+      published_rank: index + 1,
+      title: item.title
     }));
 
   const manualAddUrls = normalizeManualUrlList(String(formData.get("manual_add_urls") ?? ""));
@@ -133,7 +139,9 @@ export async function saveNewsletterDraft(formData: FormData) {
     [
       JSON.stringify({
         source: "admin_newsletter",
+        draft_id: query.draftId,
         menu_id: query.menuId,
+        source_menu_id: query.menuId,
         query: {
           audience: query.audience,
           lane: query.lane,
@@ -155,7 +163,7 @@ export async function clearNewsletterDraft(formData: FormData) {
   requireAdmin();
 
   const query = readNewsletterQuery(formData);
-  if (!query.menuId) {
+  if (!query.draftId || !query.menuId) {
     redirect(buildNewsletterAdminHref(query));
   }
 
@@ -165,7 +173,9 @@ export async function clearNewsletterDraft(formData: FormData) {
     [
       JSON.stringify({
         source: "admin_newsletter",
+        draft_id: query.draftId,
         menu_id: query.menuId,
+        source_menu_id: query.menuId,
         query: {
           audience: query.audience,
           lane: query.lane,
