@@ -213,7 +213,8 @@ scripts/
 - Newsletter menu requires `NEWSLETTER_SECRET`; generated menus are logged in `admin_events` under `newsletter_menu_generated` for later feedback attachment.
 - Admin newsletter review does not require `NEWSLETTER_SECRET` because it is gated by the existing admin cookie and reads the menu server-side.
 - Newsletter draft persistence currently lives in `admin_events` for speed; if the workflow hardens, promote it to a dedicated table.
-- Newsletter blurb generation uses the existing Anthropic env (`ANTHROPIC_API_KEY`) and fails inline per item when a selected story or manual URL does not have enough usable source text.
+- Newsletter blurb generation uses the existing Anthropic env (`ANTHROPIC_API_KEY`), retries transient Anthropic overload errors, and fails inline per item when a selected story or manual URL still does not have enough usable source text.
+- Manual URL blurbs use DB context first, then free HTML scrape, and only then a bounded Firecrawl summary fallback when the free path is too thin.
 - SEO: root metadata with OG/Twitter tags, per-story `generateMetadata()`, dynamic sitemap, robots.txt, auto-generated OG image.
 - All styling uses CSS classes from `globals.css`.
 - Admin pages use "legacy" class names -- they work, low priority to update.

@@ -1592,7 +1592,7 @@ async function freeArticleScrape(url: string): Promise<string> {
   }
 }
 
-async function fetchArticleSummary(url: string) {
+export async function fetchArticleSummary(url: string) {
   const data = await fetchFirecrawlScrape(url, ["markdown", "html"], {
     onlyMainContent: true
   });

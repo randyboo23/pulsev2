@@ -5,6 +5,7 @@ import type {
   NewsletterGeneratedBlurb
 } from "@pulse/core";
 import { pool } from "@/src/lib/db";
+import { fetchArticleSummary } from "@/src/lib/ingest";
 
 const NEWSLETTER_BLURB_SYSTEM_PROMPT = `You are a newsletter writer for PulseK12, a weekly newsletter for K-12 education leaders.
 
@@ -42,6 +43,13 @@ type NewsletterBlurbContext = {
   sourceName: string | null;
   contextText: string;
 };
+
+const RETRYABLE_ANTHROPIC_STATUSES = new Set([408, 429, 500, 502, 503, 504, 529]);
+const ANTHROPIC_BLURB_MAX_ATTEMPTS = 3;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function stripTags(input: string) {
   return input.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -161,8 +169,24 @@ async function fetchHtmlViaHttp(url: string, maxChars = 200_000) {
 }
 
 function parseBlurbResponse(text: string) {
-  const trimmed = text.trim();
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json|text|markdown)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
   if (!trimmed || trimmed.toUpperCase() === "UNUSABLE") return null;
+
+  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as { headline?: string; summary?: string };
+      const headline = sanitizeText(parsed.headline ?? "", 140);
+      const summary = sanitizeText(parsed.summary ?? "", 500);
+      if (headline && summary) {
+        return { headline, summary };
+      }
+    } catch {}
+  }
 
   let headline = "";
   let summary = "";
@@ -177,18 +201,18 @@ function parseBlurbResponse(text: string) {
   };
 
   for (const rawLine of trimmed.split("\n")) {
-    const line = rawLine.trim();
+    const line = rawLine.trim().replace(/^\*\*(.+)\*\*$/g, "$1").trim();
     if (!line) continue;
-    if (/^headline:/i.test(line)) {
+    if (/^(?:[-*]\s*)?(?:headline|title)\s*:/i.test(line)) {
       commitField();
       currentField = "headline";
-      currentContent = [line.replace(/^headline:\s*/i, "").trim()];
+      currentContent = [line.replace(/^(?:[-*]\s*)?(?:headline|title)\s*:\s*/i, "").trim()];
       continue;
     }
-    if (/^summary:/i.test(line)) {
+    if (/^(?:[-*]\s*)?(?:summary|blurb)\s*:/i.test(line)) {
       commitField();
       currentField = "summary";
-      currentContent = [line.replace(/^summary:\s*/i, "").trim()];
+      currentContent = [line.replace(/^(?:[-*]\s*)?(?:summary|blurb)\s*:\s*/i, "").trim()];
       continue;
     }
     if (currentField) currentContent.push(line);
@@ -197,6 +221,31 @@ function parseBlurbResponse(text: string) {
   commitField();
   headline = headline.trim();
   summary = summary.trim();
+  if (!headline || !summary) {
+    const lines = trimmed
+      .split("\n")
+      .map((line) => line.replace(/^\*\*(.+)\*\*$/g, "$1").trim())
+      .filter(Boolean);
+
+    if (lines.length >= 2) {
+      const inferredHeadline = sanitizeText(lines[0] ?? "", 140);
+      const inferredSummary = sanitizeText(lines.slice(1).join(" "), 500);
+      if (inferredHeadline && inferredSummary) {
+        headline = headline || inferredHeadline;
+        summary = summary || inferredSummary;
+      }
+    } else if (lines.length === 1) {
+      const paragraph = sanitizeText(lines[0] ?? "", 500);
+      const sentences = paragraph.split(/(?<=[.!?])\s+/).filter(Boolean);
+      if (!summary && sentences.length >= 2) {
+        summary = paragraph;
+      }
+      if (!headline && sentences.length >= 1) {
+        headline = sanitizeText(sentences[0] ?? "", 140);
+      }
+    }
+  }
+
   if (!headline || !summary) return null;
   return { headline, summary };
 }
@@ -231,58 +280,79 @@ Requirements:
 - Do not use bullets.
 - If the source material is too thin to write accurately, respond with exactly: UNUSABLE`;
 
+  let lastError = "Anthropic did not return a usable newsletter blurb.";
+
   for (const model of modelCandidates) {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 300,
-        temperature: 0.2,
-        system: NEWSLETTER_BLURB_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
+    for (let attempt = 1; attempt <= ANTHROPIC_BLURB_MAX_ATTEMPTS; attempt += 1) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 300,
+          temperature: 0.2,
+          system: NEWSLETTER_BLURB_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
 
-    if (!response.ok) {
-      if (response.status === 404) continue;
-      const suffix =
-        response.status === 401 || response.status === 403
-          ? " Check the Anthropic API key."
-          : "";
-      return {
-        headline: null,
-        summary: null,
-        error: `Anthropic returned ${response.status}.${suffix}`.trim()
-      };
+      if (!response.ok) {
+        if (response.status === 404) {
+          lastError = `Anthropic model unavailable: ${model}.`;
+          break;
+        }
+
+        if (response.status === 401 || response.status === 403) {
+          return {
+            headline: null,
+            summary: null,
+            error: `Anthropic returned ${response.status}. Check the Anthropic API key.`
+          };
+        }
+
+        if (RETRYABLE_ANTHROPIC_STATUSES.has(response.status) && attempt < ANTHROPIC_BLURB_MAX_ATTEMPTS) {
+          await sleep(700 * attempt);
+          continue;
+        }
+
+        lastError = RETRYABLE_ANTHROPIC_STATUSES.has(response.status)
+          ? `Anthropic is temporarily overloaded (${response.status}). Try again in a minute.`
+          : `Anthropic returned ${response.status}.`;
+        break;
+      }
+
+      const payload = await response.json();
+      const text = payload?.content?.[0]?.text;
+      if (!text || typeof text !== "string") {
+        lastError = "Anthropic returned an empty response.";
+        if (attempt < ANTHROPIC_BLURB_MAX_ATTEMPTS) {
+          await sleep(500 * attempt);
+          continue;
+        }
+        break;
+      }
+
+      const parsed = parseBlurbResponse(text);
+      if (parsed) {
+        return { headline: parsed.headline, summary: parsed.summary, error: null };
+      }
+
+      lastError = "Anthropic returned text, but not in a usable newsletter format.";
+      if (attempt < ANTHROPIC_BLURB_MAX_ATTEMPTS) {
+        await sleep(500 * attempt);
+        continue;
+      }
     }
-
-    const payload = await response.json();
-    const text = payload?.content?.[0]?.text;
-    if (!text || typeof text !== "string") {
-      return { headline: null, summary: null, error: "Anthropic returned an empty response." };
-    }
-
-    const parsed = parseBlurbResponse(text);
-    if (!parsed) {
-      return {
-        headline: null,
-        summary: null,
-        error: "Anthropic did not return a usable HEADLINE/SUMMARY pair."
-      };
-    }
-
-    return { headline: parsed.headline, summary: parsed.summary, error: null };
   }
 
   return {
     headline: null,
     summary: null,
-    error: "No compatible Anthropic model was available for newsletter blurbs."
+    error: lastError
   };
 }
 
@@ -315,12 +385,20 @@ async function loadManualUrlContext(url: string): Promise<NewsletterBlurbContext
   }
 
   const html = await fetchHtmlViaHttp(normalizedUrl);
-  if (!html) return null;
+  const title = html ? normalizeOptionalText(extractHtmlTitle(html)) : null;
+  const description = html ? normalizeOptionalText(extractMetaDescription(html)) : null;
+  const paragraphs = html ? extractParagraphs(html) : [];
+  let contextText = [description, ...paragraphs].filter(Boolean).join("\n\n").trim();
 
-  const title = normalizeOptionalText(extractHtmlTitle(html));
-  const description = normalizeOptionalText(extractMetaDescription(html));
-  const paragraphs = extractParagraphs(html);
-  const contextText = [description, ...paragraphs].filter(Boolean).join("\n\n").trim();
+  if (contextText.length < 40) {
+    try {
+      const firecrawlSummary = normalizeOptionalText(await fetchArticleSummary(normalizedUrl));
+      if (firecrawlSummary) {
+        contextText = [contextText, firecrawlSummary].filter(Boolean).join("\n\n").trim();
+      }
+    } catch {}
+  }
+
   if (!title && !contextText) return null;
 
   return {
