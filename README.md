@@ -40,6 +40,7 @@ Techmeme for US K-12 education news.
 - Automatic story-brief refresh on ingest (`fillStorySummaries`) so top stories update continuously.
 - Top-story publish gate runs before rank persistence to auto-demote suspect top slots (mixed-state/entity-conflict clusters and state/topic saturation spillover).
 - Top-story publish gate now runs a merge-first prepass on the AI-ranked top candidate pool so same-event duplicates are merged before any top-slot demotion fallback.
+- Ingest now runs a bounded single-source corroboration audit/discovery pass for important top-story singletons before homepage rank persistence, using Google News RSS plus canonical URL, aggregator, source-family, state/entity, time-window, and title/lede similarity guards.
 - Ingest now audits persisted top-10 stories for same-event duplicate pairs and emits a guardrail alert when any remain after merge/publish-gate passes.
 - Optional: duplicate-pair guardrail alerts can send email via SMTP (Gmail supported) when top-story duplicates remain.
 - Automatic homepage-rank refresh on ingest (`refreshHomepageRanks`) so homepage order is precomputed in DB.
@@ -48,7 +49,9 @@ Techmeme for US K-12 education news.
 - Ingest telemetry now reports mixed-cluster audit counters (`mixedStoryCandidates`, `mixedStoryOutliers`, `mixedStoriesSplit`).
 - Deterministic ranking analysis with `story_type` (`breaking|policy|feature|evergreen|opinion`) and lead-eligibility gating.
 - Top-story ranking now applies title-topic diversity suppression, semantic event-action normalization, and a top-20 event-cluster cap (with strict novelty override) to reduce same-event repeats.
-- Ranking now also uses source-family-aware diversity (independent publisher families) so syndicated/alias duplicates carry less weight than genuinely independent corroboration.
+- Ranking now also uses source-family-aware diversity (independent publisher families) so syndicated/alias duplicates carry less weight than genuinely independent corroboration, with stronger penalties for ordinary single-source stories.
+- Homepage story metadata displays source counts from `source_count`/`source_family_count` and article/update counts separately.
+- Shared headline normalization cleans mixed/lowercase feed titles while preserving acronyms such as `AI`, `K-12`, `EdTech`, `IEP`, and district abbreviations.
 - Lead-story selection guardrail: evergreen/opinion items are demoted from hero unless urgency override signals are present.
 - Source authority is now weighted more aggressively in ranking, with additional demotion for single-source low-authority stories.
 - Hard-news gate now demotes low-newsworthiness feature clusters (single-source, low-urgency, non-policy) so instructional evergreen content does not float to top slots.
@@ -150,7 +153,12 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Optional extra check: `npm run qa:audience` (fixture-based audience filter guardrail)
 - Optional extra check: `npm run qa:k12-relevance` (fixture-based K-12 topical filter guardrail)
 - Optional extra check: `npm run qa:newsletter-ranking` (fixture-based weekly newsletter ranking guardrail)
+- Optional extra check: `npm run qa:ranking` (fixture-based homepage ranking guardrail)
+- Optional extra check: `npm run qa:headline` (headline capitalization regression guardrail)
+- Optional extra check: `npm run qa:source-coverage` (corroboration discovery guardrail fixtures)
+- Optional extra check: `npm run qa:homepage-display` (homepage source/article wording guardrail)
 - Optional live audit: `npm run qa:newsletter-coverage` (requires local `.env`; shows newsletter/homepage source mix and likely unmerged single-source stories)
+- Optional live audit: `npm run qa:single-source-audit` (requires local `.env`; prints the latest `top_story_single_source_audit` event)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)
 - Optional extra check: `npm run qa:source-family` (fixture-based source-family dedupe guardrail)
 - Optional monitoring check: `npm run qa:guardrails` (shows recent ingest guardrail alerts from `admin_events`)
@@ -191,6 +199,14 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `TOP_STORY_DUPLICATE_AUDIT_LIMIT` (default `10`)
   - `TOP_STORY_DUPLICATE_AUDIT_SIMILARITY` (default `0.54`)
   - `INGEST_MAX_DISCOVERY_ITEMS_PER_FEED` (default `40`; caps Google News discovery volume per query to control noise/cost)
+  - `CORROBORATION_DISCOVERY_ENABLED` (default `true`; set `false` to disable bounded top-story corroboration discovery)
+  - `CORROBORATION_DISCOVERY_LIMIT` (default `20`; scans this many top stories for important single-source candidates)
+  - `CORROBORATION_DISCOVERY_PER_STORY_LIMIT` (default `8`; max Google News RSS candidates checked per story)
+  - `CORROBORATION_DISCOVERY_CANDIDATE_LIMIT` (default `80`; global max candidates checked per ingest)
+  - `CORROBORATION_DISCOVERY_MAX_LINKS_PER_STORY` (default `2`; max accepted corroborating links per story per ingest)
+  - `CORROBORATION_DISCOVERY_WINDOW_HOURS` (default `72`; discovered coverage must be close to the seed article timestamp)
+  - `CORROBORATION_DISCOVERY_MIN_SCORE` (default `4.0`; minimum deterministic score for singleton discovery unless urgent/pinned/policy/breaking)
+  - `CORROBORATION_DISCOVERY_MIN_SIMILARITY` (default `0.28`; title/lede lexical floor for same-event acceptance)
   - `GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES` (default `60`, skips repeated same-pair alerts within cooldown)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_HOST` (default `smtp.gmail.com`)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_PORT` (default `465`)

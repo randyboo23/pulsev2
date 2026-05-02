@@ -185,7 +185,7 @@ const STORY_QUERY = `
     s.editor_summary,
     s.status,
     count(sa.article_id) as article_count,
-    count(distinct a.source_id) as source_count,
+    count(distinct coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), '')))) as source_count,
     count(a.id) filter (where coalesce(a.published_at, a.fetched_at) >= now() - interval '24 hours') as recent_count,
     avg(coalesce(src.weight, 1.0)) as avg_weight,
     max(coalesce(a.published_at, a.fetched_at)) as latest_at,

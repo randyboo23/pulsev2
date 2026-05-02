@@ -39,6 +39,19 @@ function truncateHeadline(title: string, maxLength = 140) {
   return `${safe.trim()}…`;
 }
 
+function formatCount(value: number, singular: string, plural = `${singular}s`) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function formatSourceCount(story: { source_count: number; source_family_count?: number }) {
+  const sources = Math.max(0, Number(story.source_count ?? 0));
+  const families = Math.max(0, Number(story.source_family_count ?? 0));
+  if (families > 0 && families < sources) {
+    return `${formatCount(families, "independent source")} (${formatCount(sources, "outlet")})`;
+  }
+  return formatCount(sources, "source");
+}
+
 export default async function HomePage({
   searchParams
 }: {
@@ -137,7 +150,10 @@ export default async function HomePage({
             )}
             <div className="featured-meta">
               <span className="featured-meta-item">
-                {featuredStory.article_count} sources reporting
+                {formatSourceCount(featuredStory)} reporting
+              </span>
+              <span className="featured-meta-item">
+                {formatCount(featuredStory.article_count, "article")}
               </span>
               <span className="featured-meta-item">
                 {featuredStory.recent_count} updates in 24h
@@ -184,7 +200,10 @@ export default async function HomePage({
                     )}
                     <div className="story-meta">
                       <span className="story-stat">
-                        {story.article_count} sources
+                        {formatSourceCount(story)}
+                      </span>
+                      <span className="story-stat">
+                        {formatCount(story.article_count, "article")}
                       </span>
                       <span className="story-stat">
                         {story.recent_count} in 24h

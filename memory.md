@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-03-13
+Last updated: 2026-05-02
 
 ---
 
@@ -43,7 +43,11 @@ Last updated: 2026-03-13
 - Top-story diversity now enforces max one story per state by default (and one per state+topic), with an override for strong-coverage stories (>=3 sources), while keeping pinned/urgency-override exceptions.
 - Top-story selection now uses audience-bucket mix guards (`teachers`, `admins`, `edtech`) in the first top-10 pass to avoid single-source saturation in any one content lane.
 - Ranking now gives stronger weight to source diversity and applies a soft single-source penalty for non-urgent stories, while exempting urgent/high-impact single-source developments.
+- Ranking now gives stronger weight to independent source-family diversity and applies a stronger ordinary single-source penalty, with exceptions narrowed to pinned, urgent/high-authority breaking, or strong policy/legal stories.
 - Ranking now uses source-family-aware diversity (independent publisher families) for diversity boosts and single-source penalties, reducing syndication/alias inflation.
+- Ingest now runs a bounded top-story single-source audit and corroboration discovery pass before homepage rank persistence, logging `top_story_single_source_audit` and linking only candidates that pass canonical URL, aggregator, source-family, relevance/quality, state/entity, 72h time-window, and title/lede similarity guards.
+- Homepage now labels `source_count`/`source_family_count` as sources and shows `article_count` separately, so article volume is no longer mislabeled as source coverage.
+- Shared headline normalization now fixes lower/mixed-case feed titles while preserving acronyms and common K-12 abbreviations (`AI`, `K-12`, `EdTech`, `IEP`, `DPSCD`, etc.).
 - Top-story candidate quality now hard-filters static/taxonomy story titles (for example `Privacy Policy`, `Work with Us`, grade-band index titles) before ranking.
 - Non-story tag/index pages now include `State of the Union` and `/tags/` patterns, and mixed-story generic token handling now treats `union` as non-strong overlap in merge heuristics.
 - Homepage ranking now hard-excludes non-pinned opinion stories from top slots (including `Opinion:`-prefixed titles).
@@ -193,3 +197,4 @@ Last updated: 2026-03-13
 - 2026-03-13: Added Pulse-style blurb generation to `/admin/newsletter`; the pinned draft now stores selected-story context, manual URLs, and generated headline + 3-sentence summaries in `admin_events`, with inline per-item failures instead of silent drops.
 - 2026-03-13: Added an in-page jump link from the shortlist action area to the generated blurbs section so editors do not have to scroll through the full menu after generation.
 - 2026-03-13: Newsletter blurb generation now retries transient Anthropic `500/529` failures, accepts slightly looser response formatting before declaring parse failure, and uses Firecrawl only as a manual-URL fallback after DB/free-HTML context comes up thin.
+- 2026-05-02: Implemented Source Coverage + Popularity Revamp V1: fixed homepage source/article wording, added shared headline casing cleanup, added guarded top-story single-source corroboration discovery/audit, tightened single-source ranking penalties, and added regression/QA scripts for ranking, headline, source coverage, homepage display, and single-source audit reporting.

@@ -46,6 +46,18 @@ export function sourceFamilyFromDomain(domain: string | null | undefined) {
   return registrableDomain(normalized);
 }
 
+export function sourceFamilyFromArticle(params: {
+  domain: string | null | undefined;
+  title?: string | null;
+  summary?: string | null;
+  sourceName?: string | null;
+}) {
+  const text = `${params.sourceName ?? ""} ${params.title ?? ""} ${params.summary ?? ""}`.toLowerCase();
+  if (/\b(associated press|the ap|ap news)\b/.test(text)) return "apnews.com";
+  if (/\breuters\b/.test(text)) return "reuters.com";
+  return sourceFamilyFromDomain(params.domain);
+}
+
 export function countSourceFamilies(domains: Array<string | null | undefined>) {
   const families = new Set<string>();
   for (const domain of domains) {

@@ -21,85 +21,10 @@ import {
 import { isLikelyNonStoryTitle } from "./story-quality";
 import { hasStrictK12TopicSignal } from "./k12-relevance";
 import { countSourceFamilies } from "./source-family";
+import { normalizeHeadlineTitle } from "./headline";
 
 function normalizeTitleCase(title: string) {
-  const trimmed = title.trim();
-  if (!trimmed) return trimmed;
-  if (/[A-Z]/.test(trimmed)) return trimmed;
-
-  const lowerExceptions = new Set([
-    "a",
-    "an",
-    "the",
-    "and",
-    "but",
-    "or",
-    "for",
-    "nor",
-    "on",
-    "at",
-    "to",
-    "from",
-    "by",
-    "of",
-    "in",
-    "vs",
-    "vs.",
-    "with",
-    "without",
-    "into",
-    "over",
-    "under",
-    "as",
-    "per"
-  ]);
-
-  const acronyms: Record<string, string> = {
-    ai: "AI",
-    us: "US",
-    "u.s.": "U.S.",
-    "k-12": "K-12",
-    nyc: "NYC",
-    la: "LA",
-    sf: "SF",
-    dc: "DC",
-    stem: "STEM",
-    sel: "SEL",
-    cte: "CTE",
-    ell: "ELL",
-    esl: "ESL",
-    iep: "IEP",
-    edtech: "EdTech"
-  };
-
-  const titleCaseWord = (word: string, index: number) => {
-    const leadingMatch = word.match(/^\W+/);
-    const trailingMatch = word.match(/\W+$/);
-    const leading = leadingMatch ? leadingMatch[0] : "";
-    const trailing = trailingMatch ? trailingMatch[0] : "";
-    const core = word.slice(leading.length, word.length - trailing.length);
-    if (!core) return word;
-
-    const parts = core.split("-");
-    const rebuilt = parts
-      .map((part, partIndex) => {
-        const lower = part.toLowerCase();
-        if (acronyms[lower]) return acronyms[lower];
-        if (index > 0 && lowerExceptions.has(lower)) return lower;
-        if (/^\d/.test(lower)) return lower.toUpperCase();
-        if (partIndex > 0 && lowerExceptions.has(lower)) return lower;
-        if (lower.length <= 2) return lower.toUpperCase();
-        return lower.charAt(0).toUpperCase() + lower.slice(1);
-      })
-      .join("-");
-
-    return `${leading}${rebuilt}${trailing}`;
-  };
-
-  return trimmed
-    .split(/\s+/)
-    .map((word, index) => titleCaseWord(word, index))
-    .join(" ");
+  return normalizeHeadlineTitle(title);
 }
 
 const DISPLAY_SUMMARY_DISCARD_TERMS = [
@@ -1898,8 +1823,11 @@ export async function getTopStories(
       s.first_seen_at,
       s.last_seen_at,
       count(sa.article_id) as article_count,
-      count(distinct a.source_id) as source_count,
-      array_remove(array_agg(distinct src.domain), null) as source_domains,
+      count(distinct coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), '')))) as source_count,
+      array_remove(
+        array_agg(distinct coalesce(src.domain, lower(nullif(split_part(regexp_replace(a.url, '^https?://', ''), '/', 1), '')))),
+        null
+      ) as source_domains,
       count(a.id) filter (where coalesce(a.published_at, a.fetched_at) >= now() - interval '24 hours') as recent_count,
       avg(coalesce(src.weight, 1.0)) as avg_weight,
       max(coalesce(a.published_at, a.fetched_at)) as latest_at,

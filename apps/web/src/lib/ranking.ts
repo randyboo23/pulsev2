@@ -31,6 +31,7 @@ export type RankingBreakdown = {
   singleSourcePenalty: number;
   thinCoveragePenalty: number;
   hardNewsPenalty: number;
+  recentMomentumBonus: number;
   lowNewsFeature: boolean;
   lowAuthoritySingleton: boolean;
   weakEvergreenSignals: boolean;
@@ -383,12 +384,12 @@ const INSTRUCTIONAL_HINTS = [
   "for teachers"
 ];
 
-const SOURCE_DIVERSITY_WEIGHT = 1.05;
+const SOURCE_DIVERSITY_WEIGHT = 1.35;
 const SINGLE_SOURCE_IMPORTANCE_URGENCY = 2;
 const SINGLE_SOURCE_IMPORTANCE_IMPACT = 2;
 const SINGLE_SOURCE_IMPORTANCE_POLICY = 2;
-const SINGLE_SOURCE_SOFT_PENALTY_AUTHORITY = 0.9;
-const SINGLE_SOURCE_SOFT_PENALTY_LOW_AUTHORITY = 0.85;
+const SINGLE_SOURCE_SOFT_PENALTY_AUTHORITY = 0.74;
+const SINGLE_SOURCE_SOFT_PENALTY_LOW_AUTHORITY = 0.58;
 
 function countHits(text: string, terms: string[]) {
   const lowered = text.toLowerCase();
@@ -458,9 +459,14 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.75 : 1;
   const importantSingleSource =
     independentSourceCount <= 1 &&
-    (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY ||
-      impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT ||
-      (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY && recentCount >= 1));
+    ((storyType === "breaking" &&
+      urgencyOverride &&
+      authorityMultiplier >= 1 &&
+      (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY || impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT)) ||
+      (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY &&
+        impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT &&
+        authorityMultiplier >= 1.2 &&
+        recentCount >= 1));
   const singleSourcePenalty =
     !urgencyOverride &&
     independentSourceCount <= 1 &&
@@ -476,7 +482,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     independentSourceCount <= 1 &&
     recentCount <= 1 &&
     inputs.articleCount <= 1
-      ? 0.82
+      ? 0.72
       : 1;
   const lowNewsFeature =
     storyType === "feature" &&
@@ -494,6 +500,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     volume * 0.9 +
     (familyDiversity * SOURCE_DIVERSITY_WEIGHT + sourceDiversity * 0.35) +
     recency;
+  const recentMomentumBonus = 1 + Math.min(0.25, Math.max(0, recentCount - 1) * 0.08);
 
   const score =
     base *
@@ -502,7 +509,8 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
     singletonPenalty *
     singleSourcePenalty *
     thinCoveragePenalty *
-    hardNewsPenalty;
+    hardNewsPenalty *
+    recentMomentumBonus;
 
   let leadEligible = true;
   let leadReason: string | null = null;
@@ -545,6 +553,7 @@ export function analyzeStoryRanking(inputs: RankingInputs): StoryRankingAnalysis
       singleSourcePenalty: Number(singleSourcePenalty.toFixed(2)),
       thinCoveragePenalty: Number(thinCoveragePenalty.toFixed(2)),
       hardNewsPenalty: Number(hardNewsPenalty.toFixed(2)),
+      recentMomentumBonus: Number(recentMomentumBonus.toFixed(2)),
       lowNewsFeature,
       lowAuthoritySingleton,
       weakEvergreenSignals,
@@ -588,17 +597,22 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
   const singletonPenalty = !urgencyOverride && lowAuthoritySingleton ? 0.82 : 1;
   const importantSingleSource =
     independentSourceCount <= 1 &&
-    (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY ||
-      impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT ||
-      (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY && recentCount >= 1));
+    ((storyType === "breaking" &&
+      urgencyOverride &&
+      authorityMultiplier >= 1 &&
+      (urgency >= SINGLE_SOURCE_IMPORTANCE_URGENCY || impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT)) ||
+      (policyHits >= SINGLE_SOURCE_IMPORTANCE_POLICY &&
+        impact >= SINGLE_SOURCE_IMPORTANCE_IMPACT &&
+        authorityMultiplier >= 1.2 &&
+        recentCount >= 1));
   const singleSourcePenalty =
     !urgencyOverride &&
     independentSourceCount <= 1 &&
     storyType !== "breaking" &&
     !importantSingleSource
       ? authorityMultiplier >= 1
-        ? 0.94
-        : 0.9
+        ? 0.78
+        : 0.68
       : 1;
   const thinCoveragePenalty =
     !urgencyOverride &&
@@ -606,7 +620,7 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
     independentSourceCount <= 1 &&
     recentCount <= 1 &&
     inputs.articleCount <= 1
-      ? 0.9
+      ? 0.78
       : 1;
   const lowNewsFeature =
     storyType === "feature" &&
@@ -624,11 +638,11 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
   const momentumBonus = 1 + Math.min(0.18, Math.max(0, recentCount - 1) * 0.05);
   const coverageBoost =
     independentSourceCount >= 4
-      ? 1.45
+      ? 1.6
       : independentSourceCount === 3
-        ? 1.32
+        ? 1.42
         : independentSourceCount === 2
-          ? 1.16
+          ? 1.24
           : 1;
 
   const base =
@@ -637,7 +651,7 @@ export function analyzeNewsletterStoryRanking(inputs: RankingInputs): Newsletter
     urgency * 1.2 +
     relevance * 1.2 +
     volume * 0.9 +
-    (familyDiversity * 1.4 + sourceDiversity * 0.3) +
+    (familyDiversity * 1.65 + sourceDiversity * 0.3) +
     operatorFit +
     weeklyRecency;
 

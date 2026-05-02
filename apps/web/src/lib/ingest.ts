@@ -20,6 +20,15 @@ import {
   isClearlyOffTopicForK12
 } from "./k12-relevance";
 import { sendSmtpTextEmail } from "./smtp";
+import { normalizeHeadlineTitle } from "./headline";
+import {
+  buildCorroborationSearchQuery,
+  coverageSourceFamily,
+  isAggregatorDomain,
+  isWithinCoverageWindow,
+  titleLedeSimilarity,
+  type SingleSourceAuditReason
+} from "./source-coverage";
 
 const parser = new Parser({
   timeout: 10000,
@@ -180,6 +189,50 @@ const LINKEDIN_TOP_STORY_EMAIL_MAX_SOURCE_NAMES = envBoundedInt(
   2,
   6
 );
+const CORROBORATION_DISCOVERY_ENABLED =
+  String(process.env.CORROBORATION_DISCOVERY_ENABLED ?? "true").toLowerCase() !== "false";
+const CORROBORATION_DISCOVERY_SCAN_LIMIT = envBoundedInt(
+  "CORROBORATION_DISCOVERY_LIMIT",
+  20,
+  5,
+  40
+);
+const CORROBORATION_DISCOVERY_PER_STORY_LIMIT = envBoundedInt(
+  "CORROBORATION_DISCOVERY_PER_STORY_LIMIT",
+  8,
+  3,
+  20
+);
+const CORROBORATION_DISCOVERY_CANDIDATE_LIMIT = envBoundedInt(
+  "CORROBORATION_DISCOVERY_CANDIDATE_LIMIT",
+  80,
+  10,
+  240
+);
+const CORROBORATION_DISCOVERY_MAX_LINKS_PER_STORY = envBoundedInt(
+  "CORROBORATION_DISCOVERY_MAX_LINKS_PER_STORY",
+  2,
+  1,
+  5
+);
+const CORROBORATION_DISCOVERY_WINDOW_HOURS = envBoundedInt(
+  "CORROBORATION_DISCOVERY_WINDOW_HOURS",
+  72,
+  12,
+  168
+);
+const CORROBORATION_DISCOVERY_MIN_SCORE = envBoundedFloat(
+  "CORROBORATION_DISCOVERY_MIN_SCORE",
+  4.0,
+  0,
+  30
+);
+const CORROBORATION_DISCOVERY_MIN_SIMILARITY = envBoundedFloat(
+  "CORROBORATION_DISCOVERY_MIN_SIMILARITY",
+  0.28,
+  0.1,
+  0.8
+);
 
 const TOP_SLOT_ROUNDUP_PATTERNS = [
   /\bnumber of the week\b/i,
@@ -317,6 +370,20 @@ async function recordTopStoryPublishGateEvent(detail: Record<string, unknown>) {
   } catch (error) {
     console.error(
       `[ingest] failed to record top-story gate event: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+async function recordTopStorySingleSourceAuditEvent(detail: Record<string, unknown>) {
+  try {
+    await pool.query(
+      `insert into admin_events (event_type, detail)
+       values ('top_story_single_source_audit', $1::jsonb)`,
+      [JSON.stringify(detail)]
+    );
+  } catch (error) {
+    console.error(
+      `[ingest] failed to record single-source audit event: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
@@ -531,6 +598,9 @@ type IngestResult = {
   publishGateChecked: number;
   publishGateFlagged: number;
   publishGateDemoted: number;
+  singleSourceAuditChecked: number;
+  corroborationDiscovered: number;
+  corroborationLinked: number;
   topStoryDuplicatePairs: number;
   relevanceChecked: number;
   relevanceRejected: number;
@@ -561,6 +631,46 @@ type TopStoryPublishGateResult = {
 
 type TopStoryPublishGatePassResult = TopStoryPublishGateResult & {
   demotedStoryIds: string[];
+};
+
+type StoryCoverageArticle = {
+  articleId: string;
+  url: string;
+  title: string;
+  summary: string | null;
+  domain: string | null;
+  sourceName: string | null;
+  timestamp: Date;
+  isPrimary: boolean;
+};
+
+type StoryCoverageContext = {
+  seedArticle: StoryCoverageArticle | null;
+  sourceFamilies: Set<string>;
+  sourceDomains: Set<string>;
+};
+
+type RankedStoryCandidate = Awaited<ReturnType<typeof getTopStories>>[number];
+
+type TopStorySingleSourceAuditDetail = {
+  storyId: string;
+  rank: number;
+  title: string;
+  sourceCount: number;
+  sourceFamilyCount: number;
+  checkedCandidates: number;
+  linked: number;
+  reasons: Partial<Record<SingleSourceAuditReason, number>>;
+  skippedReason: string | null;
+  acceptedUrls: string[];
+};
+
+type TopStorySingleSourceAuditResult = {
+  checked: number;
+  singleSourceStories: number;
+  discoveredCandidates: number;
+  linked: number;
+  details: TopStorySingleSourceAuditDetail[];
 };
 
 type ArticleQualityLabel = "article" | "non_article" | "uncertain";
@@ -1302,87 +1412,7 @@ function isLowQualitySummary(text: string) {
 }
 
 function normalizeTitleCase(title: string) {
-  const trimmed = title.trim();
-  if (!trimmed) return trimmed;
-  // Skip normalization only if title looks properly title-cased:
-  // multiple words starting with uppercase (not just sentence case)
-  const words = trimmed.split(/\s+/);
-  const upperStartCount = words.filter((w) => /^[A-Z]/.test(w)).length;
-  if (upperStartCount >= Math.max(2, words.length * 0.4)) return trimmed;
-
-  const lowerExceptions = new Set([
-    "a",
-    "an",
-    "the",
-    "and",
-    "but",
-    "or",
-    "for",
-    "nor",
-    "on",
-    "at",
-    "to",
-    "from",
-    "by",
-    "of",
-    "in",
-    "vs",
-    "vs.",
-    "with",
-    "without",
-    "into",
-    "over",
-    "under",
-    "as",
-    "per"
-  ]);
-
-  const acronyms: Record<string, string> = {
-    ai: "AI",
-    us: "US",
-    "u.s.": "U.S.",
-    "k-12": "K-12",
-    nyc: "NYC",
-    la: "LA",
-    sf: "SF",
-    dc: "DC",
-    stem: "STEM",
-    sel: "SEL",
-    cte: "CTE",
-    ell: "ELL",
-    esl: "ESL",
-    iep: "IEP",
-    edtech: "EdTech"
-  };
-
-  const titleCaseWord = (word: string, index: number) => {
-    const leadingMatch = word.match(/^\W+/);
-    const trailingMatch = word.match(/\W+$/);
-    const leading = leadingMatch ? leadingMatch[0] : "";
-    const trailing = trailingMatch ? trailingMatch[0] : "";
-    const core = word.slice(leading.length, word.length - trailing.length);
-    if (!core) return word;
-
-    const parts = core.split("-");
-    const rebuilt = parts
-      .map((part, partIndex) => {
-        const lower = part.toLowerCase();
-        if (acronyms[lower]) return acronyms[lower];
-        if (index > 0 && lowerExceptions.has(lower)) return lower;
-        if (/^\d/.test(lower)) return lower.toUpperCase();
-        if (partIndex > 0 && lowerExceptions.has(lower)) return lower;
-        if (lower.length <= 2) return lower.toUpperCase();
-        return lower.charAt(0).toUpperCase() + lower.slice(1);
-      })
-      .join("-");
-
-    return `${leading}${rebuilt}${trailing}`;
-  };
-
-  return trimmed
-    .split(/\s+/)
-    .map((word, index) => titleCaseWord(word, index))
-    .join(" ");
+  return normalizeHeadlineTitle(title);
 }
 
 function isGenericLinkText(text: string) {
@@ -1997,6 +2027,46 @@ async function resolveGoogleNewsUrl(url: string) {
     return response.url || url;
   } catch {
     return url;
+  }
+}
+
+async function resolveCanonicalArticleUrl(url: string) {
+  const redirected = await resolveGoogleNewsUrl(url);
+  const normalizedRedirect = normalizeUrl(redirected);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetch(normalizedRedirect, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "PulseK12/1.0 (+https://pulsek12.com)",
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1"
+      },
+      signal: controller.signal
+    });
+    const finalUrl = normalizeUrl(response.url || normalizedRedirect);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok || !/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+      return finalUrl;
+    }
+
+    const html = (await response.text()).slice(0, 250_000);
+    const canonicalMatch = html.match(/<link\b[^>]*rel=(["'])canonical\1[^>]*>/i);
+    const tag = canonicalMatch?.[0] ?? "";
+    const hrefMatch = tag.match(/\bhref=(["'])(.*?)\1/i);
+    if (!hrefMatch?.[2]) return finalUrl;
+
+    try {
+      return normalizeUrl(new URL(decodeEntities(hrefMatch[2]), finalUrl).toString());
+    } catch {
+      return finalUrl;
+    }
+  } catch {
+    return normalizedRedirect;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -3054,6 +3124,520 @@ async function runTopStoriesPublishGate(): Promise<TopStoryPublishGateResult> {
   };
 }
 
+function incrementAuditReason(
+  reasons: Partial<Record<SingleSourceAuditReason, number>>,
+  reason: SingleSourceAuditReason
+) {
+  reasons[reason] = (reasons[reason] ?? 0) + 1;
+}
+
+function shouldAttemptCorroborationDiscovery(story: RankedStoryCandidate, rank: number) {
+  if (!CORROBORATION_DISCOVERY_ENABLED) return false;
+  if (rank > CORROBORATION_DISCOVERY_SCAN_LIMIT) return false;
+  const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+  const sourceFamilyCount = Math.max(0, Number(story.source_family_count ?? sourceCount));
+  if (sourceCount > 1 || sourceFamilyCount > 1) return false;
+  if (story.status === "pinned") return true;
+  if (story.lead_urgency_override) return true;
+  if (Number(story.score ?? 0) >= CORROBORATION_DISCOVERY_MIN_SCORE) return true;
+  return story.story_type === "breaking" || story.story_type === "policy";
+}
+
+async function loadStoryCoverageContext(storyId: string): Promise<StoryCoverageContext> {
+  const result = await pool.query(
+    `select
+       a.id as article_id,
+       a.url,
+       a.title,
+       a.summary,
+       src.domain,
+       src.name as source_name,
+       coalesce(a.published_at, a.fetched_at) as timestamp,
+       sa.is_primary
+     from story_articles sa
+     join articles a on a.id = sa.article_id
+     left join sources src on src.id = a.source_id
+     where sa.story_id = $1
+       and coalesce(a.quality_label, 'unknown') <> 'non_article'
+     order by sa.is_primary desc, coalesce(a.published_at, a.fetched_at) desc`,
+    [storyId]
+  );
+
+  const articles: StoryCoverageArticle[] = result.rows.map((row) => {
+    const timestamp = row.timestamp ? new Date(row.timestamp as string) : new Date();
+    return {
+      articleId: String(row.article_id ?? ""),
+      url: String(row.url ?? ""),
+      title: String(row.title ?? ""),
+      summary: (row.summary as string | null | undefined) ?? null,
+      domain: (row.domain as string | null | undefined) ?? null,
+      sourceName: (row.source_name as string | null | undefined) ?? null,
+      timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
+      isPrimary: Boolean(row.is_primary)
+    };
+  });
+
+  const sourceFamilies = new Set<string>();
+  const sourceDomains = new Set<string>();
+  for (const article of articles) {
+    const domain = getDomain(article.url) || article.domain || "";
+    if (domain) sourceDomains.add(domain);
+    const family = coverageSourceFamily({
+      domain,
+      title: article.title,
+      summary: article.summary,
+      sourceName: article.sourceName
+    });
+    if (family) sourceFamilies.add(family);
+  }
+
+  return {
+    seedArticle: articles[0] ?? null,
+    sourceFamilies,
+    sourceDomains
+  };
+}
+
+function googleNewsSearchUrl(query: string) {
+  const params = new URLSearchParams({
+    q: `${query} when:3d`,
+    hl: "en-US",
+    gl: "US",
+    ceid: "US:en"
+  });
+  return `https://news.google.com/rss/search?${params.toString()}`;
+}
+
+async function loadExistingArticleStory(url: string) {
+  const result = await pool.query(
+    `select
+       a.id as article_id,
+       array_remove(array_agg(sa.story_id), null) as story_ids
+     from articles a
+     left join story_articles sa on sa.article_id = a.id
+     where a.url = $1
+     group by a.id
+     limit 1`,
+    [url]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const storyIds = Array.isArray(row.story_ids)
+    ? (row.story_ids as Array<string | null>).filter(Boolean) as string[]
+    : [];
+  return {
+    articleId: String(row.article_id ?? ""),
+    storyIds
+  };
+}
+
+async function upsertDiscoveredCoverageArticle(params: {
+  storyId: string;
+  url: string;
+  title: string;
+  summary: string;
+  publishedAt: Date;
+  domain: string;
+  sourceName: string;
+  quality: ArticleQualityDecision;
+  similarity: number;
+}) {
+  const sourceId = await ensureSource(params.sourceName, params.domain, "unknown");
+  if (!sourceId) return false;
+
+  const summaryCandidatePayload = JSON.stringify([
+    {
+      source: "rss",
+      score: scoreSummaryCandidate(params.title, params.summary, "rss"),
+      text: params.summary
+    }
+  ]);
+
+  const articleResult = await pool.query(
+    `insert into articles (
+       source_id,
+       url,
+       title,
+       summary,
+       quality_label,
+       quality_score,
+       quality_reasons,
+       quality_checked_at,
+       summary_choice_source,
+       summary_choice_method,
+       summary_choice_confidence,
+       summary_choice_reasons,
+       summary_choice_checked_at,
+       summary_candidates,
+       published_at
+     )
+     values ($1, $2, $3, $4, $5, $6, $7, now(), 'rss', 'deterministic', $8, $9, now(), $10::jsonb, $11)
+     on conflict (url)
+     do update set
+       title = excluded.title,
+       summary = case
+         when articles.summary is null or length(trim(articles.summary)) < 40 then excluded.summary
+         else articles.summary
+       end,
+       quality_label = excluded.quality_label,
+       quality_score = excluded.quality_score,
+       quality_reasons = excluded.quality_reasons,
+       quality_checked_at = now(),
+       updated_at = now()
+     returning id`,
+    [
+      sourceId,
+      params.url,
+      params.title,
+      params.summary,
+      params.quality.label,
+      params.quality.score,
+      params.quality.reasons,
+      Number(Math.max(0.5, Math.min(0.92, params.similarity)).toFixed(2)),
+      ["corroboration_discovery"],
+      summaryCandidatePayload,
+      params.publishedAt
+    ]
+  );
+
+  const articleId = articleResult.rows[0]?.id as string | undefined;
+  if (!articleId) return false;
+
+  const linkResult = await pool.query(
+    `insert into story_articles (story_id, article_id, is_primary)
+     values ($1, $2, false)
+     on conflict (story_id, article_id) do nothing
+     returning article_id`,
+    [params.storyId, articleId]
+  );
+
+  if (linkResult.rows.length === 0) return false;
+
+  await pool.query(
+    `update stories
+     set last_seen_at = greatest(last_seen_at, $2),
+         updated_at = now()
+     where id = $1`,
+    [params.storyId, params.publishedAt]
+  );
+
+  return true;
+}
+
+async function evaluateAndMaybeLinkCorroboration(params: {
+  story: RankedStoryCandidate;
+  context: StoryCoverageContext;
+  rawUrl: string;
+  rawTitle: string;
+  rawSummary: string;
+  rawDate: Date | null;
+}) {
+  const seed = params.context.seedArticle;
+  if (!seed) {
+    return { linked: false, reason: "no_candidate_found" as SingleSourceAuditReason, url: null, similarity: 0 };
+  }
+
+  const canonicalUrl = await resolveCanonicalArticleUrl(params.rawUrl);
+  const domain = getDomain(canonicalUrl);
+  const title = normalizeTitleCase(cleanTitle(params.rawTitle));
+  if (!canonicalUrl || !domain || !title || isAggregatorDomain(domain)) {
+    return {
+      linked: false,
+      reason: "candidate_filtered_quality" as SingleSourceAuditReason,
+      url: canonicalUrl || params.rawUrl,
+      similarity: 0
+    };
+  }
+
+  const existing = await loadExistingArticleStory(canonicalUrl);
+  if (existing?.storyIds.includes(params.story.id)) {
+    return {
+      linked: false,
+      reason: "candidate_canonical_duplicate" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+  if (existing && existing.storyIds.length > 0) {
+    return {
+      linked: false,
+      reason: "candidate_in_different_cluster" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  let summary: string | null = sanitizeSummary(params.rawSummary);
+  if (!summary || summary.length < 50) {
+    try {
+      summary = sanitizeSummary(await freeArticleScrape(canonicalUrl));
+    } catch {
+      summary = null;
+    }
+  }
+  if (!summary) {
+    return {
+      linked: false,
+      reason: "candidate_filtered_quality" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  const sourceFamily = coverageSourceFamily({
+    domain,
+    title,
+    summary,
+    sourceName: domain
+  });
+  if (sourceFamily && params.context.sourceFamilies.has(sourceFamily)) {
+    return {
+      linked: false,
+      reason: "candidate_source_family_duplicate" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  const quality = classifyArticleQuality({
+    url: canonicalUrl,
+    title,
+    summary
+  });
+  if (quality.label === "non_article") {
+    return {
+      linked: false,
+      reason: "candidate_filtered_quality" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+  if (
+    !isUSOnlyStory(title, summary) ||
+    isClearlyOffTopicForK12({ title, summary, url: canonicalUrl }) ||
+    !hasStrictK12TopicSignal({ title, summary, url: canonicalUrl })
+  ) {
+    return {
+      linked: false,
+      reason: "candidate_filtered_relevance" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  if (!isWithinCoverageWindow(seed.timestamp, params.rawDate, CORROBORATION_DISCOVERY_WINDOW_HOURS)) {
+    return {
+      linked: false,
+      reason: "candidate_time_window_mismatch" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  const mergeDecision = evaluateStoryMergeDecision(
+    {
+      id: params.story.id,
+      title: String(params.story.editor_title ?? params.story.title ?? seed.title).trim(),
+      status: params.story.status ?? "active",
+      article_count: Math.max(1, Number(params.story.article_count ?? 1))
+    },
+    {
+      title,
+      article_count: 1
+    },
+    0.56
+  );
+  if (mergeDecision.vetoReason === "state_mismatch") {
+    return {
+      linked: false,
+      reason: "candidate_state_mismatch" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+  if (mergeDecision.vetoReason === "entity_conflict") {
+    return {
+      linked: false,
+      reason: "candidate_entity_conflict" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity: 0
+    };
+  }
+
+  const similarity = titleLedeSimilarity({
+    seedTitle: String(params.story.editor_title ?? params.story.title ?? seed.title),
+    seedSummary: params.story.editor_summary ?? params.story.summary ?? seed.summary,
+    candidateTitle: title,
+    candidateSummary: summary
+  });
+  if (similarity < CORROBORATION_DISCOVERY_MIN_SIMILARITY) {
+    return {
+      linked: false,
+      reason: "candidate_similarity_too_low" as SingleSourceAuditReason,
+      url: canonicalUrl,
+      similarity
+    };
+  }
+
+  const publishedAt = params.rawDate && !Number.isNaN(params.rawDate.getTime()) ? params.rawDate : seed.timestamp;
+  const linked = await upsertDiscoveredCoverageArticle({
+    storyId: params.story.id,
+    url: canonicalUrl,
+    title,
+    summary,
+    publishedAt,
+    domain,
+    sourceName: domain,
+    quality,
+    similarity
+  });
+  if (linked) {
+    if (sourceFamily) params.context.sourceFamilies.add(sourceFamily);
+    params.context.sourceDomains.add(domain);
+  }
+
+  return {
+    linked,
+    reason: linked ? null : ("candidate_canonical_duplicate" as SingleSourceAuditReason),
+    url: canonicalUrl,
+    similarity
+  };
+}
+
+async function runTopStorySingleSourceAuditAndDiscovery(): Promise<TopStorySingleSourceAuditResult> {
+  const candidates = await getTopStories(Math.max(20, CORROBORATION_DISCOVERY_SCAN_LIMIT), undefined, {
+    useAiRerank: false,
+    useStoredRank: false
+  });
+  const topStories = candidates.slice(0, 20);
+  const details: TopStorySingleSourceAuditDetail[] = [];
+  let discoveredCandidates = 0;
+  let linked = 0;
+
+  for (const [index, story] of topStories.entries()) {
+    const sourceCount = Math.max(0, Number(story.source_count ?? 0));
+    const sourceFamilyCount = Math.max(0, Number(story.source_family_count ?? sourceCount));
+    if (sourceCount > 1 || sourceFamilyCount > 1) continue;
+
+    const rank = index + 1;
+    const detail: TopStorySingleSourceAuditDetail = {
+      storyId: story.id,
+      rank,
+      title: String(story.editor_title ?? story.title ?? "").trim(),
+      sourceCount,
+      sourceFamilyCount,
+      checkedCandidates: 0,
+      linked: 0,
+      reasons: {},
+      skippedReason: null,
+      acceptedUrls: []
+    };
+    details.push(detail);
+
+    if (!shouldAttemptCorroborationDiscovery(story, rank)) {
+      detail.skippedReason = CORROBORATION_DISCOVERY_ENABLED ? "not_high_importance_singleton" : "disabled";
+      continue;
+    }
+
+    const context = await loadStoryCoverageContext(story.id);
+    if (!context.seedArticle) {
+      incrementAuditReason(detail.reasons, "no_candidate_found");
+      continue;
+    }
+
+    const query = buildCorroborationSearchQuery(detail.title);
+    if (!query) {
+      incrementAuditReason(detail.reasons, "no_candidate_found");
+      continue;
+    }
+
+    let parsed;
+    try {
+      parsed = await parseFeedViaHttp(googleNewsSearchUrl(query));
+    } catch {
+      incrementAuditReason(detail.reasons, "no_candidate_found");
+      continue;
+    }
+
+    const items = (parsed.items ?? []).slice(0, CORROBORATION_DISCOVERY_PER_STORY_LIMIT);
+    if (items.length === 0) {
+      incrementAuditReason(detail.reasons, "no_candidate_found");
+      continue;
+    }
+
+    for (const item of items) {
+      if (discoveredCandidates >= CORROBORATION_DISCOVERY_CANDIDATE_LIMIT) break;
+      if (detail.linked >= CORROBORATION_DISCOVERY_MAX_LINKS_PER_STORY) break;
+
+      discoveredCandidates += 1;
+      detail.checkedCandidates += 1;
+      const rawItem = item as {
+        contentSnippet?: string;
+        content?: string;
+        isoDate?: string;
+        pubDate?: string;
+      };
+      const rawUrl = String(item.link ?? "").trim();
+      const rawTitle = String(item.title ?? "").trim();
+      if (!rawUrl || !rawTitle) {
+        incrementAuditReason(detail.reasons, "candidate_filtered_quality");
+        continue;
+      }
+      const candidateDate = rawItem.isoDate
+        ? new Date(rawItem.isoDate)
+        : rawItem.pubDate
+          ? new Date(rawItem.pubDate)
+          : null;
+      const result = await evaluateAndMaybeLinkCorroboration({
+        story,
+        context,
+        rawUrl,
+        rawTitle,
+        rawSummary: rawItem.contentSnippet ?? rawItem.content ?? "",
+        rawDate: candidateDate
+      });
+
+      if (result.linked && result.url) {
+        linked += 1;
+        detail.linked += 1;
+        detail.acceptedUrls.push(result.url);
+        continue;
+      }
+      if (result.reason) {
+        incrementAuditReason(detail.reasons, result.reason);
+      }
+    }
+
+    if (detail.checkedCandidates === 0 && Object.keys(detail.reasons).length === 0) {
+      incrementAuditReason(detail.reasons, "no_candidate_found");
+    }
+  }
+
+  const result = {
+    checked: topStories.length,
+    singleSourceStories: details.length,
+    discoveredCandidates,
+    linked,
+    details
+  };
+
+  await recordTopStorySingleSourceAuditEvent({
+    enabled: CORROBORATION_DISCOVERY_ENABLED,
+    scanLimit: CORROBORATION_DISCOVERY_SCAN_LIMIT,
+    perStoryLimit: CORROBORATION_DISCOVERY_PER_STORY_LIMIT,
+    candidateLimit: CORROBORATION_DISCOVERY_CANDIDATE_LIMIT,
+    windowHours: CORROBORATION_DISCOVERY_WINDOW_HOURS,
+    minSimilarity: CORROBORATION_DISCOVERY_MIN_SIMILARITY,
+    checked: result.checked,
+    singleSourceStories: result.singleSourceStories,
+    discoveredCandidates: result.discoveredCandidates,
+    linked: result.linked,
+    details: result.details
+  });
+
+  return result;
+}
+
 type TopStoryDuplicatePair = {
   leftStoryId: string;
   rightStoryId: string;
@@ -3870,6 +4454,7 @@ export async function ingestFeeds(): Promise<IngestResult> {
   }
   const summaryFill = await fillStorySummaries(100, undefined, true, 50);
   const publishGate = await runTopStoriesPublishGate();
+  const singleSourceAudit = await runTopStorySingleSourceAuditAndDiscovery();
   const rankRefresh = await refreshHomepageRanks(60);
   await maybeSendTopStoryLinkedInEmail();
   const topStoryDuplicateAudit = await auditTopStoryDuplicatePairs();
@@ -3920,6 +4505,9 @@ export async function ingestFeeds(): Promise<IngestResult> {
     publishGateChecked: publishGate.checked,
     publishGateFlagged: publishGate.flagged,
     publishGateDemoted: publishGate.demoted,
+    singleSourceAuditChecked: singleSourceAudit.singleSourceStories,
+    corroborationDiscovered: singleSourceAudit.discoveredCandidates,
+    corroborationLinked: singleSourceAudit.linked,
     topStoryDuplicatePairs,
     relevanceChecked,
     relevanceRejected
