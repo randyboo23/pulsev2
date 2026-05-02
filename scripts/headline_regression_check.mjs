@@ -37,6 +37,10 @@ const cases = [
   [
     "TX district expands K-12 AI policy",
     "TX District Expands K-12 AI Policy"
+  ],
+  [
+    "professional development for IT teams in the age of digital citizenship",
+    "Professional Development for IT Teams in the Age of Digital Citizenship"
   ]
 ];
 

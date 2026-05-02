@@ -184,6 +184,13 @@ function fixKnownCasingWord(word: string, wordIndex: number, words: string[]) {
   return `${leading}${rebuilt}${trailing}`;
 }
 
+function fixContextualCasing(title: string) {
+  return title.replace(
+    /\bIt\s+(Teams?|Departments?|Leaders?|Staff|Infrastructure|Security|Systems?|Services?|Budgets?|Directors?|Admins?|Administrators?|Operations?)\b/g,
+    "IT $1"
+  );
+}
+
 function shouldTitleCase(title: string) {
   const words = title.split(/\s+/).filter(Boolean);
   if (words.length === 0) return false;
@@ -215,8 +222,8 @@ export function normalizeHeadlineTitle(title: string | null | undefined) {
 
   const words = trimmed.split(/\s+/);
   if (shouldTitleCase(trimmed)) {
-    return words.map((word, index) => titleCaseWord(word, index)).join(" ");
+    return fixContextualCasing(words.map((word, index) => titleCaseWord(word, index)).join(" "));
   }
 
-  return words.map(fixKnownCasingWord).join(" ");
+  return fixContextualCasing(words.map(fixKnownCasingWord).join(" "));
 }
