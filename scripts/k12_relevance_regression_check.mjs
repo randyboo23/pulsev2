@@ -78,6 +78,11 @@ const strictRejectCases = [
     title: "Man Accused of Tricking Hundreds of Teens into Sending Him Pornographic Images Is Brought to US",
     summary: "A man accused of child sexual exploitation was extradited to the United States.",
     offTopic: true
+  },
+  {
+    title: "Search Underway for Two U.S. Soldiers Missing in Morocco",
+    summary: "Officials said the soldiers were missing after an incident overseas.",
+    offTopic: false
   }
 ];
 

@@ -157,6 +157,7 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
 - Optional extra check: `npm run qa:headline` (headline capitalization regression guardrail)
 - Optional extra check: `npm run qa:source-coverage` (corroboration discovery guardrail fixtures)
 - Optional extra check: `npm run qa:homepage-display` (homepage source/article wording guardrail)
+- Optional extra check: `npm run qa:homepage-topic-dedupe` (homepage same-event topic dedupe guardrail)
 - Optional live audit: `npm run qa:newsletter-coverage` (requires local `.env`; shows newsletter/homepage source mix and likely unmerged single-source stories)
 - Optional live audit: `npm run qa:single-source-audit` (requires local `.env`; prints the latest `top_story_single_source_audit` event)
 - Optional extra check: `npm run qa:story-quality` (fixture-based non-story candidate filter guardrail)

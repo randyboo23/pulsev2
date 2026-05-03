@@ -39,6 +39,10 @@ const cases = [
     "TX District Expands K-12 AI Policy"
   ],
   [
+    "wisconsin dpi partners with schools to expand early literacy support",
+    "Wisconsin DPI Partners with Schools to Expand Early Literacy Support"
+  ],
+  [
     "professional development for IT teams in the age of digital citizenship",
     "Professional Development for IT Teams in the Age of Digital Citizenship"
   ],

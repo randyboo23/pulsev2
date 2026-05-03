@@ -39,6 +39,7 @@ const KNOWN_CASING: Record<string, string> = {
   dc: "DC",
   dei: "DEI",
   de: "DE",
+  dpi: "DPI",
   dpscd: "DPSCD",
   ela: "ELA",
   ell: "ELL",

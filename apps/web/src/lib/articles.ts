@@ -1,6 +1,9 @@
 import "server-only";
 import { pool } from "./db";
-import { hasStrictK12TopicSignal } from "./k12-relevance";
+import {
+  hasStrictK12TopicSignal,
+  isClearlyOffTopicForK12
+} from "./k12-relevance";
 
 export type ArticleRow = {
   id: string;
@@ -23,6 +26,18 @@ const GENERIC_WIRE_TITLE_PATTERNS = [
   /\bcharacters?\s+or\s+less\b/i
 ];
 
+const WIRE_REJECT_DOMAINS = new Set([
+  "facebook.com",
+  "instagram.com",
+  "linkedin.com",
+  "reddit.com",
+  "threads.net",
+  "tiktok.com",
+  "twitter.com",
+  "x.com",
+  "youtube.com"
+]);
+
 function isGenericWireTitle(title: string) {
   const trimmed = title.trim();
   if (!trimmed) return true;
@@ -30,6 +45,23 @@ function isGenericWireTitle(title: string) {
   if (GENERIC_WIRE_TITLE_PATTERNS.some((pattern) => pattern.test(trimmed))) return true;
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (trimmed.length < 28 && words.length <= 4) return true;
+  return false;
+}
+
+function getHostname(url: string | null | undefined) {
+  try {
+    return new URL(url ?? "").hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isRejectedWireDomain(url: string | null | undefined) {
+  const hostname = getHostname(url);
+  if (!hostname) return false;
+  for (const domain of WIRE_REJECT_DOMAINS) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) return true;
+  }
   return false;
 }
 
@@ -72,15 +104,20 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
     .filter((row) => {
       const title = (row.title ?? "").trim();
       if (!title || isGenericWireTitle(title)) return false;
-
-      const isApEducation = (row.source_name ?? "").toLowerCase() === "ap news education";
-      if (!isApEducation) return true;
+      if (isRejectedWireDomain(row.url)) return false;
 
       const hasK12Signal = hasStrictK12TopicSignal({
         title: row.title,
         summary: row.summary,
         url: row.url
       });
+      if (!hasK12Signal || isClearlyOffTopicForK12({ title: row.title, summary: row.summary, url: row.url })) {
+        return false;
+      }
+
+      const isApEducation = (row.source_name ?? "").toLowerCase() === "ap news education";
+      if (!isApEducation) return true;
+
       const score =
         typeof row.relevance_score === "number" && Number.isFinite(row.relevance_score)
           ? row.relevance_score

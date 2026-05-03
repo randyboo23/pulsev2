@@ -207,7 +207,7 @@ scripts/
 - `admin_events`: admin action trail.
 
 ## Read/Render Contracts
-- Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, with filtered preview text, lead metadata, real source counts, and separate article/update counts.
+- Homepage uses `getTopStories()`: ranked stories ordered by precomputed `homepage_rank` when available, then re-filtered for visible-window topic diversity and preview-ready text, with lead metadata, real source counts, and separate article/update counts.
 - Homepage audience views (`/?audience=teachers|admins|edtech`) reuse `getTopStories()`, but audience matching is boundary-aware; `edtech` additionally requires K-12 tech context instead of naive substring hits.
 - Newsletter menu uses `getNewsletterMenuStories()`: ranked 7-day story menu with `menu_id`, weekly score, `why_ranked`, and primary/supporting article links for downstream editorial workflows.
 - Newsletter menu filters can narrow by `lane`, `audience`, minimum source count, and explicit story/story-type exclusions; each story returns `matched_lanes` so Cowork/editorial tooling can blend focused pulls back into a broad menu.

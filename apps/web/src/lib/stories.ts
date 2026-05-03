@@ -377,6 +377,12 @@ const TOPIC_TOKEN_CANONICAL: Record<string, string> = {
   approves: "vote",
   approved: "vote",
   approval: "vote",
+  fund: "funding",
+  funds: "funding",
+  funded: "funding",
+  funding: "funding",
+  finance: "funding",
+  financial: "funding",
   raid: "raid",
   raids: "raid",
   raided: "raid",
@@ -679,6 +685,15 @@ function storyTopicOverlapDetails(a: StoryTopicCandidate, b: StoryTopicCandidate
 
 function storyTopicOverlapRatio(a: StoryTopicCandidate, b: StoryTopicCandidate, cache: StoryTopicTokenCache) {
   return storyTopicOverlapDetails(a, b, cache).ratio;
+}
+
+export function calculateHomepageTopicOverlapForTest(leftTitle: string, rightTitle: string) {
+  const cache: StoryTopicTokenCache = new Map();
+  return storyTopicOverlapDetails(
+    { id: "left", title: leftTitle, editor_title: null },
+    { id: "right", title: rightTitle, editor_title: null },
+    cache
+  );
 }
 
 function maxStoryTopicOverlap(story: StoryTopicCandidate, others: StoryTopicCandidate[], cache: StoryTopicTokenCache) {
@@ -2043,9 +2058,13 @@ export async function getTopStories(
     });
 
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
-  const finalSet = (audience ? filtered : scored).filter(
+  const topicFilteredSet = (audience ? filtered : scored).filter(
     (story) => story.status === "pinned" || story.matches_k12_topic
   );
+  const previewReadySet = topicFilteredSet.filter(
+    (story) => story.status === "pinned" || Boolean(story.editor_summary ?? story.summary)
+  );
+  const finalSet = previewReadySet.length >= Math.min(limit, 12) ? previewReadySet : topicFilteredSet;
 
   const demotedStories = finalSet
     .filter((story) => story.status === "demoted")
@@ -2065,7 +2084,8 @@ export async function getTopStories(
     const ordered = orderStoriesByStoredRank(finalSet)
       .filter((story) => story.status !== "demoted")
       .filter((story) => !isOpinionLikeStory(story));
-    return dedupeStorySummariesForDisplay(withDemotedFallback(ordered));
+    const diversityFiltered = selectDiverseTopStories(ordered, limit);
+    return dedupeStorySummariesForDisplay(withDemotedFallback(diversityFiltered));
   }
 
   const rankingPool = finalSet

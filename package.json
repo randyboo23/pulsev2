@@ -20,6 +20,7 @@
     "qa:headline": "node --import tsx/esm scripts/headline_regression_check.mjs",
     "qa:source-coverage": "node --conditions react-server --import tsx/esm scripts/source_coverage_regression_check.mjs",
     "qa:homepage-display": "node scripts/homepage_source_display_check.mjs",
+    "qa:homepage-topic-dedupe": "node --conditions react-server --import tsx/esm scripts/homepage_topic_dedupe_check.mjs",
     "qa:single-source-audit": "/bin/zsh -lc \"set -a; source .env >/dev/null 2>&1; node --conditions react-server --import tsx/esm scripts/single_source_audit_report.mjs\"",
     "qa:story-quality": "node --import tsx/esm scripts/story_quality_regression_check.mjs",
     "qa:source-family": "node --import tsx/esm scripts/source_family_regression_check.mjs",
