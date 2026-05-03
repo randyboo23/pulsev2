@@ -49,7 +49,8 @@ Grouping (grouping.ts) -- lexical title-key matching + similar-story merge pass
     v
 Single-Source Corroboration (ingest.ts) -- audits top-story singletons into `top_story_single_source_audit`
     |                                      bounded Google News discovery for important single-source candidates
-    |                                      resolves redirects/canonical URLs before dedupe
+    |                                      decodes Google News RSS wrappers only in this bounded path,
+    |                                      then resolves redirects/canonical URLs before dedupe
     |                                      rejects aggregators, source-family duplicates, stale matches,
     |                                      state/entity conflicts, low-similarity title/lede matches,
     |                                      and low-quality/off-topic articles before linking
@@ -57,6 +58,7 @@ Single-Source Corroboration (ingest.ts) -- audits top-story singletons into `top
     v
 Ranking (ranking.ts + stories.ts) -- deterministic scoring (impact, urgency, policy, novelty,
     |                                relevance, source authority, recency, volume)
+    |                                strict K-12 topic gate before homepage rank persistence
     |                                penalties: evergreen, singleton, thin coverage, hard news gate,
     |                                plus alias-aware title-topic similarity penalty for same-event repeats
     |                                source diversity uses independent source-family count (not just raw outlet count)

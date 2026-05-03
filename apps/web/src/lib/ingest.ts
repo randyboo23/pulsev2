@@ -38,7 +38,10 @@ const parser = new Parser({
 });
 
 let anthropicAvailable: boolean | null = null;
+let anthropicCreditWarningLogged = false;
 let firecrawlBackoffUntil = 0;
+const googleNewsDecodeCache = new Map<string, string>();
+let googleNewsDecodeAttempts = 0;
 
 const FIRECRAWL_BACKOFF_MS = 15 * 60 * 1000;
 const FIRECRAWL_DAILY_BUDGET = Number(process.env.FIRECRAWL_DAILY_BUDGET ?? "90");
@@ -233,6 +236,18 @@ const CORROBORATION_DISCOVERY_MIN_SIMILARITY = envBoundedFloat(
   0.1,
   0.8
 );
+const GOOGLE_NEWS_DECODE_TIMEOUT_MS = envBoundedInt(
+  "GOOGLE_NEWS_DECODE_TIMEOUT_MS",
+  3_500,
+  1_000,
+  10_000
+);
+const GOOGLE_NEWS_DECODE_LIMIT = envBoundedInt(
+  "GOOGLE_NEWS_DECODE_LIMIT",
+  40,
+  20,
+  500
+);
 
 const TOP_SLOT_ROUNDUP_PATTERNS = [
   /\bnumber of the week\b/i,
@@ -243,6 +258,36 @@ const TOP_SLOT_ROUNDUP_PATTERNS = [
 ];
 
 let lastFirecrawlBudgetWarningDay = "";
+
+function parseAnthropicErrorMessage(body: string) {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string; type?: string } };
+    return String(parsed.error?.message || parsed.error?.type || body).trim();
+  } catch {
+    return body.trim();
+  }
+}
+
+async function handleAnthropicError(response: Response, label: string) {
+  const body = await response.text().catch(() => "");
+  const message = parseAnthropicErrorMessage(body);
+  const creditBalanceLow = /credit balance is too low/i.test(message);
+
+  if (creditBalanceLow || response.status === 401 || response.status === 403) {
+    anthropicAvailable = false;
+  }
+
+  if (creditBalanceLow) {
+    if (!anthropicCreditWarningLogged) {
+      console.error(`[ingest] ${label} unavailable ${response.status}: credit_balance_low`);
+      anthropicCreditWarningLogged = true;
+    }
+    return;
+  }
+
+  const detail = message ? `: ${message.slice(0, 240)}` : "";
+  console.error(`[ingest] ${label} error ${response.status}${detail}`);
+}
 
 type IngestGroupingGuardrailMetrics = {
   grouped: number;
@@ -579,6 +624,8 @@ type IngestResult = {
   updated: number;
   skipped: number;
   unresolvedGoogleSkipped: number;
+  googleNewsDecodeAttempts: number;
+  googleNewsDecodeLimit: number;
   grouped: number;
   mergedStories: number;
   mixedStoryCandidates: number;
@@ -652,6 +699,14 @@ type StoryCoverageContext = {
 
 type RankedStoryCandidate = Awaited<ReturnType<typeof getTopStories>>[number];
 
+type TopStorySingleSourceCandidateSample = {
+  reason: SingleSourceAuditReason;
+  detail: string;
+  url: string | null;
+  title: string | null;
+  similarity: number | null;
+};
+
 type TopStorySingleSourceAuditDetail = {
   storyId: string;
   rank: number;
@@ -663,6 +718,7 @@ type TopStorySingleSourceAuditDetail = {
   reasons: Partial<Record<SingleSourceAuditReason, number>>;
   skippedReason: string | null;
   acceptedUrls: string[];
+  candidateSamples: TopStorySingleSourceCandidateSample[];
 };
 
 type TopStorySingleSourceAuditResult = {
@@ -695,6 +751,13 @@ async function classifyContentRelevance(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
   if (anthropicAvailable === false) return null;
+  const modelCandidates = [
+    process.env.ANTHROPIC_MODEL,
+    "claude-sonnet-4-5-20250929",
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest"
+  ].filter(Boolean) as string[];
 
   const prompt = `You are an editorial filter for a K-12 education news aggregator serving superintendents, principals, and district administrators.
 
@@ -711,40 +774,45 @@ Respond with ONLY valid JSON:
 {"relevant":true/false,"score":0.0-1.0,"category":"policy|district_ops|curriculum|safety|edtech|workforce|off_topic|personal|commercial","reason":"brief explanation"}`;
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-haiku-latest",
-        max_tokens: 100,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
+    for (const model of modelCandidates) {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 100,
+          temperature: 0,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        anthropicAvailable = false;
+      if (!response.ok) {
+        if (response.status === 404) continue;
+        await handleAnthropicError(response, "relevance classifier");
+        return null;
       }
-      return null;
+
+      anthropicAvailable = true;
+      const payload = await response.json();
+      const text = payload?.content?.[0]?.text;
+      if (!text) return null;
+
+      const parsed = JSON.parse(extractJson(text));
+      return {
+        relevant: Boolean(parsed.relevant),
+        score: Number(parsed.score) || 0,
+        category: String(parsed.category || "off_topic"),
+        reason: String(parsed.reason || "")
+      };
     }
 
-    anthropicAvailable = true;
-    const payload = await response.json();
-    const text = payload?.content?.[0]?.text;
-    if (!text) return null;
-
-    const parsed = JSON.parse(extractJson(text));
-    return {
-      relevant: Boolean(parsed.relevant),
-      score: Number(parsed.score) || 0,
-      category: String(parsed.category || "off_topic"),
-      reason: String(parsed.reason || "")
-    };
+    anthropicAvailable = false;
+    console.error("[ingest] relevance classifier error 404 across candidate models");
+    return null;
   } catch {
     return null;
   }
@@ -1563,9 +1631,9 @@ function extractFirstParagraph(html: string) {
 }
 
 async function fetchHtmlViaHttp(url: string, maxChars = 200_000): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(url, {
       headers: {
         "User-Agent":
@@ -1575,7 +1643,6 @@ async function fetchHtmlViaHttp(url: string, maxChars = 200_000): Promise<string
       redirect: "follow",
       signal: controller.signal
     });
-    clearTimeout(timeout);
     if (!response.ok) return "";
 
     const contentType = response.headers.get("content-type") ?? "";
@@ -1585,6 +1652,8 @@ async function fetchHtmlViaHttp(url: string, maxChars = 200_000): Promise<string
     return text.slice(0, maxChars);
   } catch {
     return "";
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -1698,13 +1767,9 @@ Write 1-2 sentences (max 60 words). State the key fact or development first. Inc
 
     if (!response.ok) {
       if (response.status === 404) {
-        anthropicAvailable = false;
         continue;
       }
-      if (response.status === 401 || response.status === 403) {
-        anthropicAvailable = false;
-      }
-      console.error(`[ingest] anthropic error ${response.status}`);
+      await handleAnthropicError(response, "summary generator");
       return "";
     }
 
@@ -1883,13 +1948,9 @@ async function adjudicateSummaryWithAnthropic(
 
     if (!response.ok) {
       if (response.status === 404) {
-        anthropicAvailable = false;
         continue;
       }
-      if (response.status === 401 || response.status === 403) {
-        anthropicAvailable = false;
-      }
-      console.error(`[ingest] adjudicator error ${response.status}`);
+      await handleAnthropicError(response, "summary adjudicator");
       return null;
     }
 
@@ -2014,8 +2075,157 @@ function isUnresolvedGoogleNewsUrl(url: string) {
   return /news\.google\.com\/rss\/articles\//i.test(url);
 }
 
-async function resolveGoogleNewsUrl(url: string) {
+function getGoogleNewsArticleId(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "news.google.com") return null;
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const markerIndex = segments.findIndex((segment) => segment === "articles" || segment === "read");
+    const id = markerIndex >= 0 ? segments[markerIndex + 1] : null;
+    return id ? decodeURIComponent(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGoogleNewsDecode(url: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOOGLE_NEWS_DECODE_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchGoogleNewsDecodeParams(articleId: string) {
+  const urls = [
+    `https://news.google.com/articles/${encodeURIComponent(articleId)}`,
+    `https://news.google.com/rss/articles/${encodeURIComponent(articleId)}`
+  ];
+
+  for (const url of urls) {
+    try {
+      const response = await fetchGoogleNewsDecode(url, {
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0"
+        }
+      });
+      if (!response.ok) continue;
+      const html = await response.text();
+      const signature = html.match(/data-n-a-sg="([^"]+)"/)?.[1] ?? null;
+      const timestamp = html.match(/data-n-a-ts="([^"]+)"/)?.[1] ?? null;
+      if (signature && timestamp) {
+        return { signature, timestamp };
+      }
+    } catch {
+      // Try the next Google News URL shape.
+    }
+  }
+
+  return null;
+}
+
+async function decodeGoogleNewsArticleUrl(url: string) {
+  const articleId = getGoogleNewsArticleId(url);
+  if (!articleId) return null;
+
+  const cached = googleNewsDecodeCache.get(articleId);
+  if (cached) return cached;
+  if (googleNewsDecodeAttempts >= GOOGLE_NEWS_DECODE_LIMIT) return null;
+  googleNewsDecodeAttempts += 1;
+
+  const params = await fetchGoogleNewsDecodeParams(articleId);
+  if (!params) return null;
+
+  const timestamp = Number(params.timestamp);
+  if (!Number.isFinite(timestamp)) return null;
+
+  const payload = [
+    "Fbv4je",
+    JSON.stringify([
+      "garturlreq",
+      [
+        [
+          "X",
+          "X",
+          ["X", "X"],
+          null,
+          null,
+          1,
+          1,
+          "US:en",
+          null,
+          1,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0,
+          1
+        ],
+        "X",
+        "X",
+        1,
+        [1, 1, 1],
+        1,
+        1,
+        null,
+        0,
+        0,
+        null,
+        0
+      ],
+      articleId,
+      timestamp,
+      params.signature
+    ])
+  ];
+  const body = `f.req=${encodeURIComponent(JSON.stringify([[payload]]))}`;
+
+  try {
+    const response = await fetchGoogleNewsDecode(
+      "https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "User-Agent": "Mozilla/5.0",
+          Referer: "https://news.google.com/"
+        },
+        body
+      }
+    );
+    if (!response.ok) return null;
+
+    const text = await response.text();
+    const rawJson = text.split("\n\n")[1];
+    if (!rawJson) return null;
+    const parsed = JSON.parse(rawJson) as unknown[];
+    const encodedResult = Array.isArray(parsed[0]) ? parsed[0][2] : null;
+    if (typeof encodedResult !== "string") return null;
+    const decodedResult = JSON.parse(encodedResult) as unknown[];
+    const decodedUrl = typeof decodedResult[1] === "string" ? normalizeUrl(decodedResult[1]) : null;
+    if (!decodedUrl || decodedUrl.includes("news.google.com")) return null;
+
+    googleNewsDecodeCache.set(articleId, decodedUrl);
+    return decodedUrl;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveGoogleNewsUrl(url: string, options: { decodeGoogleNews?: boolean } = {}) {
   if (!url.includes("news.google.com")) return url;
+  if (options.decodeGoogleNews) {
+    const decoded = await decodeGoogleNewsArticleUrl(url);
+    if (decoded) return decoded;
+  }
   try {
     const response = await fetch(url, {
       method: "HEAD",
@@ -2031,7 +2241,7 @@ async function resolveGoogleNewsUrl(url: string) {
 }
 
 async function resolveCanonicalArticleUrl(url: string) {
-  const redirected = await resolveGoogleNewsUrl(url);
+  const redirected = await resolveGoogleNewsUrl(url, { decodeGoogleNews: true });
   const normalizedRedirect = normalizeUrl(redirected);
 
   const controller = new AbortController();
@@ -3131,6 +3341,14 @@ function incrementAuditReason(
   reasons[reason] = (reasons[reason] ?? 0) + 1;
 }
 
+function addCandidateAuditSample(
+  detail: TopStorySingleSourceAuditDetail,
+  sample: TopStorySingleSourceCandidateSample
+) {
+  if (detail.candidateSamples.length >= 8) return;
+  detail.candidateSamples.push(sample);
+}
+
 function shouldAttemptCorroborationDiscovery(story: RankedStoryCandidate, rank: number) {
   if (!CORROBORATION_DISCOVERY_ENABLED) return false;
   if (rank > CORROBORATION_DISCOVERY_SCAN_LIMIT) return false;
@@ -3334,18 +3552,32 @@ async function evaluateAndMaybeLinkCorroboration(params: {
 }) {
   const seed = params.context.seedArticle;
   if (!seed) {
-    return { linked: false, reason: "no_candidate_found" as SingleSourceAuditReason, url: null, similarity: 0 };
+    return {
+      linked: false,
+      reason: "no_candidate_found" as SingleSourceAuditReason,
+      url: null,
+      similarity: 0,
+      detail: "missing_seed_article"
+    };
   }
 
   const canonicalUrl = await resolveCanonicalArticleUrl(params.rawUrl);
   const domain = getDomain(canonicalUrl);
   const title = normalizeTitleCase(cleanTitle(params.rawTitle));
   if (!canonicalUrl || !domain || !title || isAggregatorDomain(domain)) {
+    const detail = isAggregatorDomain(domain)
+      ? `aggregator_domain:${domain}`
+      : !canonicalUrl
+        ? "missing_canonical_url"
+        : !domain
+          ? "missing_domain"
+          : "missing_title";
     return {
       linked: false,
       reason: "candidate_filtered_quality" as SingleSourceAuditReason,
       url: canonicalUrl || params.rawUrl,
-      similarity: 0
+      similarity: 0,
+      detail
     };
   }
 
@@ -3355,7 +3587,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_canonical_duplicate" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "already_linked_to_seed_story"
     };
   }
   if (existing && existing.storyIds.length > 0) {
@@ -3363,7 +3596,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_in_different_cluster" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: `existing_story:${existing.storyIds.slice(0, 3).join(",")}`
     };
   }
 
@@ -3380,7 +3614,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_filtered_quality" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "missing_summary_or_lede"
     };
   }
 
@@ -3395,7 +3630,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_source_family_duplicate" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: `source_family:${sourceFamily}`
     };
   }
 
@@ -3409,7 +3645,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_filtered_quality" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: `quality:${quality.reasons.join(",") || quality.score}`
     };
   }
   if (
@@ -3421,7 +3658,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_filtered_relevance" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "k12_relevance_gate"
     };
   }
 
@@ -3430,7 +3668,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_time_window_mismatch" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "outside_seed_window"
     };
   }
 
@@ -3452,7 +3691,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_state_mismatch" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "merge_veto_state_mismatch"
     };
   }
   if (mergeDecision.vetoReason === "entity_conflict") {
@@ -3460,7 +3700,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_entity_conflict" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity: 0
+      similarity: 0,
+      detail: "merge_veto_entity_conflict"
     };
   }
 
@@ -3475,7 +3716,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
       linked: false,
       reason: "candidate_similarity_too_low" as SingleSourceAuditReason,
       url: canonicalUrl,
-      similarity
+      similarity,
+      detail: `similarity:${similarity.toFixed(2)}`
     };
   }
 
@@ -3500,7 +3742,8 @@ async function evaluateAndMaybeLinkCorroboration(params: {
     linked,
     reason: linked ? null : ("candidate_canonical_duplicate" as SingleSourceAuditReason),
     url: canonicalUrl,
-    similarity
+    similarity,
+    detail: linked ? "linked" : "link_insert_noop"
   };
 }
 
@@ -3530,7 +3773,8 @@ async function runTopStorySingleSourceAuditAndDiscovery(): Promise<TopStorySingl
       linked: 0,
       reasons: {},
       skippedReason: null,
-      acceptedUrls: []
+      acceptedUrls: [],
+      candidateSamples: []
     };
     details.push(detail);
 
@@ -3581,6 +3825,13 @@ async function runTopStorySingleSourceAuditAndDiscovery(): Promise<TopStorySingl
       const rawTitle = String(item.title ?? "").trim();
       if (!rawUrl || !rawTitle) {
         incrementAuditReason(detail.reasons, "candidate_filtered_quality");
+        addCandidateAuditSample(detail, {
+          reason: "candidate_filtered_quality",
+          detail: !rawUrl ? "missing_raw_url" : "missing_raw_title",
+          url: rawUrl || null,
+          title: rawTitle || null,
+          similarity: null
+        });
         continue;
       }
       const candidateDate = rawItem.isoDate
@@ -3605,6 +3856,13 @@ async function runTopStorySingleSourceAuditAndDiscovery(): Promise<TopStorySingl
       }
       if (result.reason) {
         incrementAuditReason(detail.reasons, result.reason);
+        addCandidateAuditSample(detail, {
+          reason: result.reason,
+          detail: result.detail,
+          url: result.url,
+          title: rawTitle,
+          similarity: Number.isFinite(result.similarity) ? result.similarity : null
+        });
       }
     }
 
@@ -4071,6 +4329,7 @@ async function auditTopStoryDuplicatePairs() {
 }
 
 export async function ingestFeeds(): Promise<IngestResult> {
+  googleNewsDecodeAttempts = 0;
   const feeds = await loadFeedRegistry();
   let fetchedItems = 0;
   let inserted = 0;
@@ -4486,6 +4745,8 @@ export async function ingestFeeds(): Promise<IngestResult> {
     updated,
     skipped,
     unresolvedGoogleSkipped,
+    googleNewsDecodeAttempts,
+    googleNewsDecodeLimit: GOOGLE_NEWS_DECODE_LIMIT,
     grouped,
     mergedStories,
     mixedStoryCandidates: splitPass.candidates,

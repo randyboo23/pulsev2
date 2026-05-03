@@ -53,7 +53,8 @@ console.log(
         checked_candidates: story.checkedCandidates,
         linked: story.linked,
         skipped_reason: story.skippedReason,
-        reasons: story.reasons
+        reasons: story.reasons,
+        candidate_samples: story.candidateSamples ?? []
       }))
     },
     null,

@@ -41,6 +41,14 @@ const cases = [
   [
     "professional development for IT teams in the age of digital citizenship",
     "Professional Development for IT Teams in the Age of Digital Citizenship"
+  ],
+  [
+    "IN a Minneapolis Public School, a Cure for Toxic Politics",
+    "In a Minneapolis Public School, a Cure for Toxic Politics"
+  ],
+  [
+    "Search Underway for Two U.s. Soldiers Missing in Morocco",
+    "Search Underway for Two U.S. Soldiers Missing in Morocco"
   ]
 ];
 

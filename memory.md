@@ -5,7 +5,7 @@ Purpose:
 - Keep this short and current.
 - Record decisions and constraints, not long explanations.
 
-Last updated: 2026-05-02
+Last updated: 2026-05-03
 
 ---
 
@@ -199,3 +199,4 @@ Last updated: 2026-05-02
 - 2026-03-13: Newsletter blurb generation now retries transient Anthropic `500/529` failures, accepts slightly looser response formatting before declaring parse failure, and uses Firecrawl only as a manual-URL fallback after DB/free-HTML context comes up thin.
 - 2026-05-02: Implemented Source Coverage + Popularity Revamp V1: fixed homepage source/article wording, added shared headline casing cleanup, added guarded top-story single-source corroboration discovery/audit, tightened single-source ranking penalties, and added regression/QA scripts for ranking, headline, source coverage, homepage display, and single-source audit reporting.
 - 2026-05-02: Live V1 ingest showed headline cleanup needs contextual casing, not blanket two-letter uppercasing; added regressions for `IS/IT/WE`, numeric suffixes like `43rd`, compact metrics like `$74.5K`, and tech-context `IT Teams`.
+- 2026-05-03: Scoped Google News RSS publisher-URL decoding to bounded top-story corroboration only; broad feed decoding was too slow. Added decode timeout/cap env vars, enriched single-source audit candidate samples, fail-fast Anthropic unavailable handling, and a strict K-12 gate before homepage rank persistence. Live audit improved homepage source mix from 19/20 single-source baseline to 15/20 and newsletter from 28/30 to 21/30.

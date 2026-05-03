@@ -181,6 +181,7 @@ export type StoryRow = {
   lead_urgency_override?: boolean;
   score_breakdown?: string;
   matches_audience?: boolean;
+  matches_k12_topic?: boolean;
 };
 
 type TopStoriesOptions = {
@@ -1205,6 +1206,38 @@ function extractJson(raw: string): string {
 // AI reranking cache
 let aiRerankCache: { storyIds: string[]; demoted: Set<string>; timestamp: number } | null = null;
 const AI_RERANK_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+let aiRerankAnthropicAvailable: boolean | null = null;
+let aiRerankAnthropicCreditWarningLogged = false;
+
+function parseAnthropicErrorMessage(body: string) {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string; type?: string } };
+    return String(parsed.error?.message || parsed.error?.type || body).trim();
+  } catch {
+    return body.trim();
+  }
+}
+
+async function handleAiRerankAnthropicError(response: Response) {
+  const body = await response.text().catch(() => "");
+  const message = parseAnthropicErrorMessage(body);
+  const creditBalanceLow = /credit balance is too low/i.test(message);
+
+  if (creditBalanceLow || response.status === 401 || response.status === 403) {
+    aiRerankAnthropicAvailable = false;
+  }
+
+  if (creditBalanceLow) {
+    if (!aiRerankAnthropicCreditWarningLogged) {
+      console.error(`[rerank] anthropic unavailable ${response.status}: credit_balance_low`);
+      aiRerankAnthropicCreditWarningLogged = true;
+    }
+    return;
+  }
+
+  const detail = message ? `: ${message.slice(0, 240)}` : "";
+  console.error(`[rerank] anthropic error ${response.status}${detail}`);
+}
 
 async function aiRerank(
   stories: StoryRow[],
@@ -1212,6 +1245,7 @@ async function aiRerank(
 ): Promise<StoryRow[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey || stories.length < 3) return stories;
+  if (aiRerankAnthropicAvailable === false) return stories.slice(0, limit);
 
   // Check cache validity
   const now = Date.now();
@@ -1284,10 +1318,11 @@ Respond with ONLY valid JSON:
     });
 
     if (!response.ok) {
-      console.error(`[rerank] anthropic error ${response.status}`);
+      await handleAiRerankAnthropicError(response);
       return stories.slice(0, limit);
     }
 
+    aiRerankAnthropicAvailable = true;
     const payload = await response.json();
     const text = payload?.content?.[0]?.text;
     if (!text) return stories.slice(0, limit);
@@ -1949,12 +1984,13 @@ export async function getTopStories(
 
       const resolvedSummary = editorSummary ?? autoSummary;
       const text = `${row.editor_title ?? row.title} ${resolvedSummary ?? ""}`;
+      const matchesK12Topic = hasStrictK12TopicSignal({
+        title: row.editor_title ?? row.title,
+        summary: resolvedSummary
+      });
       const matchesK12AudienceScope =
         !audience ||
-        hasStrictK12TopicSignal({
-          title: row.editor_title ?? row.title,
-          summary: resolvedSummary
-        });
+        matchesK12Topic;
       const sourceDomains = Array.isArray(row.source_domains)
         ? (row.source_domains as Array<string | null | undefined>)
         : [];
@@ -2000,13 +2036,16 @@ export async function getTopStories(
         lead_reason: ranking.leadReason,
         lead_urgency_override: ranking.urgencyOverride,
         score_breakdown: JSON.stringify(ranking.breakdown),
+        matches_k12_topic: matchesK12Topic,
         matches_audience:
           audience ? matchesK12AudienceScope && storyMatchesAudience(text, audience) : true
       };
     });
 
   const filtered = audience ? scored.filter((story) => story.matches_audience) : scored;
-  const finalSet = audience ? filtered : scored;
+  const finalSet = (audience ? filtered : scored).filter(
+    (story) => story.status === "pinned" || story.matches_k12_topic
+  );
 
   const demotedStories = finalSet
     .filter((story) => story.status === "demoted")

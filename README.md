@@ -207,6 +207,8 @@ Note: `db/schema.sql` is idempotent; re-run it after schema updates.
   - `CORROBORATION_DISCOVERY_WINDOW_HOURS` (default `72`; discovered coverage must be close to the seed article timestamp)
   - `CORROBORATION_DISCOVERY_MIN_SCORE` (default `4.0`; minimum deterministic score for singleton discovery unless urgent/pinned/policy/breaking)
   - `CORROBORATION_DISCOVERY_MIN_SIMILARITY` (default `0.28`; title/lede lexical floor for same-event acceptance)
+  - `GOOGLE_NEWS_DECODE_LIMIT` (default `40`; caps expensive Google News RSS publisher-URL decodes per ingest, used only in bounded corroboration discovery)
+  - `GOOGLE_NEWS_DECODE_TIMEOUT_MS` (default `3500`; timeout for each Google News decode request)
   - `GUARDRAIL_ALERT_EMAIL_COOLDOWN_MINUTES` (default `60`, skips repeated same-pair alerts within cooldown)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_HOST` (default `smtp.gmail.com`)
   - `GUARDRAIL_ALERT_EMAIL_SMTP_PORT` (default `465`)

@@ -100,6 +100,7 @@ const KNOWN_CASING: Record<string, string> = {
   tn: "TN",
   tx: "TX",
   us: "US",
+  "u.s": "U.S",
   "u.s.": "U.S.",
   ut: "UT",
   va: "VA",
@@ -130,7 +131,9 @@ function normalizeKnownCasing(part: string) {
 
 function titleCasePart(part: string, wordIndex: number, partIndex: number) {
   const lower = part.toLowerCase();
-  if (wordIndex > 0 && partIndex === 0 && LOWER_EXCEPTIONS.has(lower)) return lower;
+  if (partIndex === 0 && LOWER_EXCEPTIONS.has(lower)) {
+    return wordIndex === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
+  }
   if (partIndex > 0 && LOWER_EXCEPTIONS.has(lower)) return lower;
   const known = normalizeKnownCasing(part);
   if (known) return known;
@@ -163,7 +166,7 @@ function fixKnownCasingWord(word: string, wordIndex: number, words: string[]) {
         const previousWord = words[wordIndex - 1] ?? "";
         const followsLocationComma = /,$/.test(previousWord);
         if (LOWER_EXCEPTIONS.has(lower) && !followsLocationComma) {
-          return lower;
+          return wordIndex === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
         }
         return known;
       }
