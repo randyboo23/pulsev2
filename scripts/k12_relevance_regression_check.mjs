@@ -83,6 +83,18 @@ const strictRejectCases = [
     title: "Search Underway for Two U.S. Soldiers Missing in Morocco",
     summary: "Officials said the soldiers were missing after an incident overseas.",
     offTopic: false
+  },
+  {
+    title: "The Insurgency Threatening to Derail a U.S.-Pakistan Pact",
+    summary:
+      "New coverage highlights the Insurgency Threatening to Derail a U.S.-Pakistan Pact. Why it matters: Districts may need to update classroom expectations, training, and implementation plans.",
+    offTopic: false
+  },
+  {
+    title: "Slouching Toward Kamala Harris",
+    summary:
+      "Districts are now tracking slouching Toward Kamala Harris. Why it matters: District leaders and educators may need to adjust policy, staffing, or classroom practice.",
+    offTopic: false
   }
 ];
 

@@ -4,6 +4,7 @@ import {
   hasStrictK12TopicSignal,
   isClearlyOffTopicForK12
 } from "./k12-relevance";
+import { normalizeHeadlineTitle } from "./headline";
 
 export type ArticleRow = {
   id: string;
@@ -129,5 +130,9 @@ export async function getRecentArticles(limit = 50): Promise<ArticleRow[]> {
 
       return true;
     })
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((row) => ({
+      ...row,
+      title: normalizeHeadlineTitle(row.title)
+    }));
 }

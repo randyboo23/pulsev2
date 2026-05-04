@@ -38,8 +38,22 @@ const NON_ACTIONABLE_CRIME_PATTERN =
 const SYSTEMIC_CRIME_CONTEXT_PATTERN =
   /\b(district|school board|superintendent|policy|law|lawsuit|security|safety plan|weapons detection|state education|department of education|board of education)\b/i;
 
+const SYNTHETIC_SUMMARY_START_PATTERN =
+  /^(coverage|reporting)\s+(?:is\s+)?(?:converging on|focused on|centered on|now centers on)\b|^(new coverage highlights|recent reporting points to|new reporting points to|districts are now tracking)\b|^(budget coverage now centers on|new (finance|budget) reporting highlights|district budget attention is shifting toward)\b|^(policy coverage is focused on|legal and policy reporting now centers on|new governance reporting highlights)\b|^(education reporting is focused on|classroom-focused coverage now highlights|new school reporting points to)\b/i;
+
+const SYNTHETIC_WHY_IT_MATTERS_PATTERN =
+  /\bwhy it matters:\s*(districts? (?:leaders )?(?:and educators )?may need|schools? may need|school systems may need|this could influence district priorities|budget decisions can directly affect|school finance changes can quickly impact|policy and legal changes can quickly reshape)\b/i;
+
+function relevanceSummary(summary: string | null | undefined) {
+  const normalized = String(summary ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (SYNTHETIC_SUMMARY_START_PATTERN.test(normalized)) return "";
+  if (SYNTHETIC_WHY_IT_MATTERS_PATTERN.test(normalized)) return "";
+  return normalized;
+}
+
 function normalizedText(input: K12SignalInput) {
-  return `${input.title ?? ""} ${input.summary ?? ""} ${input.url ?? ""}`
+  return `${input.title ?? ""} ${relevanceSummary(input.summary)} ${input.url ?? ""}`
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .toLowerCase()
